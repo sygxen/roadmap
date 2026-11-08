@@ -161,7 +161,7 @@ function renderHeader(stats, info) {
   const legend = el('div', { class: 'legend' },
     ...Object.entries(STATUS_CLASS).map(([status]) => el('span', {}, dot(status), status)));
   return el('section', { class: 'card' },
-    el('h1', {}, 'Road map des projets'),
+    el('h1', {}, el('img', { src: 'favicon.svg', alt: '', width: '40', height: '40' }), 'Road map des projets Octopush'),
     el('p', { class: 'subtitle' }, `Version ${latest.version ?? '?'}, mise à jour le ${latest.date ?? '?'}`),
     el('p', { class: 'summary' },
       `${stats.finished} étapes terminées sur ${stats.total}, ${stats.doing} en cours, ${stats.todo} à faire, ` +
