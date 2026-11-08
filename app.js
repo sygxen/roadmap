@@ -1,11 +1,11 @@
 'use strict';
 
-// Road map page: reads four JSON files written by another assistant and renders them.
+// Road map page: reads global.json (format 2), written by another assistant, and renders it.
 // Static page, no framework. All data is inserted with textContent (never innerHTML).
 
 const REFRESH_MS = 30000;
 const RETRY_MS = 3000;
-const FILES = ['roadmap', 'today', 'history', 'info'];
+const FILES = ['global'];
 
 // Optional ?data=<folder> lets a test copy of the data be served (never C's real files).
 const dataParam = new URLSearchParams(location.search).get('data');
@@ -61,8 +61,24 @@ function formatMinutes(min) {
   return pad(Math.floor(total / 60)) + ':' + pad(total % 60);
 }
 
+// Duration as shown in the "Temps" columns: [HH:MM]
+const bracketTime = (min) => `[${formatMinutes(min)}]`;
+
 function formatNumber(value, digits) {
   return value.toLocaleString('fr-FR', { maximumFractionDigits: digits, minimumFractionDigits: digits });
+}
+
+const sum = (list, pick) => list.reduce((total, item) => total + (pick(item) || 0), 0);
+
+// Compares sub-task numbers such as "87.2" and "87.10" numerically, part by part.
+function compareNumbers(a, b) {
+  const left = String(a).split('.').map(Number);
+  const right = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 const DAY_MS = 86400000;
@@ -75,7 +91,9 @@ async function loadFile(name) {
   const response = await fetch(`${DATA_DIR}/${name}.json?t=${Date.now()}`, { cache: 'no-store' });
   if (!response.ok) throw new Error('HTTP ' + response.status);
   const parsed = JSON.parse(await response.text());
-  if (!Array.isArray(parsed)) throw new Error('not a list');
+  if (!parsed || !Array.isArray(parsed.steps) || !Array.isArray(parsed.projects)) {
+    throw new Error('unexpected structure');
+  }
   return parsed;
 }
 
@@ -101,8 +119,7 @@ async function refresh() {
   if (Object.keys(state.failingSince).length && !state.retryTimer) {
     state.retryTimer = setTimeout(() => { state.retryTimer = null; refresh(); }, RETRY_MS);
   }
-  // Render as soon as the main file is valid; a missing secondary file shows as an empty section.
-  if (changed && state.data.roadmap) render();
+  if (changed && state.data.global) render();
 }
 
 function showBanner() {
@@ -113,14 +130,31 @@ function showBanner() {
   banner.textContent = messages.join(' · ');
 }
 
-// ---------- computations ----------
+// ---------- model and computations ----------
+
+// A step's load is the sum of its sub-tasks' estimate_min (the step's own estimate_min should match).
+function buildModel(global) {
+  const steps = global.steps.map((step) => {
+    const subtasks = step.subtasks ?? [];
+    const load = subtasks.length ? sum(subtasks, (s) => s.estimate_min) : (step.estimate_min || 0);
+    if (subtasks.length && step.estimate_min !== load) {
+      console.warn(`step ${step.id}: estimate_min ${step.estimate_min} differs from sub-task sum ${load}`);
+    }
+    return { ...step, subtasks, load };
+  });
+  const projects = [...global.projects].sort((a, b) => a.order - b.order);
+  return { info: global.info ?? {}, history: global.history ?? [], projects, steps };
+}
 
 function computeStats(steps) {
   const count = (status) => steps.filter((s) => s.status === status).length;
   const counted = steps.filter((s) => s.status !== 'Plus tard');
-  const done = counted.filter((s) => s.status === 'Terminé').length;
-  const totalMin = counted.reduce((sum, s) => sum + (s.estimate_min || 0), 0);
-  const doneMin = counted.reduce((sum, s) => sum + (s.estimate_min || 0) * (s.progress || 0), 0);
+  const stepsDone = counted.filter((s) => s.status === 'Terminé').length;
+  const subs = counted.flatMap((s) => s.subtasks);
+  const subsDone = subs.filter((s) => s.status === 'Terminé');
+  const totalMin = sum(subs, (s) => s.estimate_min);
+  const doneMin = sum(subsDone, (s) => s.estimate_min);
+  const ratio = (a, b) => (b ? (a / b) * 100 : 0);
   return {
     total: steps.length,
     finished: count('Terminé'),
@@ -128,12 +162,15 @@ function computeStats(steps) {
     todo: count('À faire'),
     later: count('Plus tard'),
     pauseOrTbd: count('En pause') + count('À renseigner'),
-    base: counted.length,
-    done,
-    pctSteps: counted.length ? (done / counted.length) * 100 : 0,
+    stepsBase: counted.length,
+    stepsDone,
+    pctSteps: ratio(stepsDone, counted.length),
+    subsBase: subs.length,
+    subsDone: subsDone.length,
+    pctSubs: ratio(subsDone.length, subs.length),
     totalMin,
     doneMin,
-    pctTime: totalMin ? (doneMin / totalMin) * 100 : 0,
+    pctTime: ratio(doneMin, totalMin),
   };
 }
 
@@ -157,12 +194,11 @@ function regress(points) {
 // ---------- rendering ----------
 
 function renderHeader(stats, info) {
-  const latest = info[info.length - 1] || {};
   const legend = el('div', { class: 'legend' },
     ...Object.entries(STATUS_CLASS).map(([status]) => el('span', {}, dot(status), status)));
   return el('section', { class: 'card' },
     el('h1', {}, el('img', { src: 'favicon.svg', alt: '', width: '40', height: '40' }), 'Road map des projets Octopush'),
-    el('p', { class: 'subtitle' }, `Version ${latest.version ?? '?'}, mise à jour le ${latest.date ?? '?'}`),
+    el('p', { class: 'subtitle' }, `Version ${info.version ?? '?'}, mise à jour le ${info.date ?? '?'}`),
     el('p', { class: 'summary' },
       `${stats.finished} étapes terminées sur ${stats.total}, ${stats.doing} en cours, ${stats.todo} à faire, ` +
       `${stats.later} plus tard, ${stats.pauseOrTbd} à renseigner ou en pause`),
@@ -184,7 +220,9 @@ function renderGlobal(stats) {
       'Avancement global (hors « Plus tard »)'),
     el('div', { class: 'metrics' },
       metric('En étapes terminées', `${formatNumber(stats.pctSteps, 1)} %`,
-        `${stats.done} sur ${stats.base}`, stats.pctSteps),
+        `${stats.stepsDone} sur ${stats.stepsBase}`, stats.pctSteps),
+      metric('En sous-tâches terminées', `${formatNumber(stats.pctSubs, 1)} %`,
+        `${stats.subsDone} sur ${stats.subsBase}`, stats.pctSubs),
       metric('En temps estimé', `${formatNumber(stats.pctTime, 1)} %`,
         `${hours(stats.doneMin)} faites sur ${hours(stats.totalMin)}, reste ${hours(stats.totalMin - stats.doneMin)}`,
         stats.pctTime)));
@@ -240,7 +278,8 @@ function renderChart(history) {
   const tooltip = document.getElementById('tooltip');
   for (const p of points) {
     const circle = add('circle', { class: 'pt', cx: sx(p.x), cy: sy(p.y), r: 5 });
-    const text = `${p.h.date} : ${formatNumber(p.y, 1)} % (${p.h.done} sur ${p.h.base})`;
+    let text = `${p.h.date} : ${formatNumber(p.y, 1)} % (${p.h.done} sur ${p.h.base})`;
+    if (p.h.sub_base) text += ` · sous-tâches ${p.h.sub_done} sur ${p.h.sub_base}`;
     circle.addEventListener('mousemove', (event) => {
       tooltip.hidden = false;
       tooltip.textContent = text;
@@ -261,50 +300,49 @@ function renderChart(history) {
   return card;
 }
 
-function renderToday(today) {
-  const rows = [...today].sort((a, b) => a.rank - b.rank);
-  const totalMin = rows.reduce((sum, r) => sum + (r.estimate_min || 0), 0);
+// Parent step shown in small text under a sub-task label.
+const parentLabel = (step) => `étape ${step.num} · ${step.step}`;
+
+// "Liste du jour": the sub-tasks that carry a `today` rank, in rank order.
+function renderToday(steps) {
+  const rows = steps
+    .flatMap((step) => step.subtasks.filter((s) => s.today != null).map((sub) => ({ sub, step })))
+    .sort((a, b) => a.sub.today - b.sub.today);
+  const totalMin = sum(rows, (r) => r.sub.estimate_min);
   const table = el('table', {},
     el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Tâche', 'Qui'].map((t) => el('th', {}, t)))),
-    el('tbody', {}, ...rows.map((r) => el('tr', { class: r.status === 'Terminé' ? 'finished' : '' },
-      el('td', { class: 'num' }, r.rank),
-      el('td', { class: 'status' }, statusCell(r.status)),
-      el('td', { class: 'time' }, r.temps),
-      el('td', {}, r.task),
-      el('td', {}, r.owner)))));
+    el('tbody', {}, ...rows.map(({ sub, step }) => el('tr', { class: sub.status === 'Terminé' ? 'finished' : '' },
+      el('td', { class: 'num' }, sub.today),
+      el('td', { class: 'status' }, statusCell(sub.status)),
+      el('td', { class: 'time' }, bracketTime(sub.estimate_min)),
+      el('td', {}, sub.label, el('div', { class: 'parent' }, parentLabel(step))),
+      el('td', {}, sub.owner)))));
   return el('section', { class: 'card' },
     el('h2', {}, 'Liste du jour'),
     table,
     el('p', { class: 'total' }, `Temps total : ${formatMinutes(totalMin)}`));
 }
 
-function subtaskCounts(step) {
-  const list = step.subtasks || [];
-  const total = step.subtasks_total ?? list.length;
-  const done = step.subtasks_done ?? list.filter((s) => s.status === 'Terminé').length;
-  return { done, total };
-}
-
 function stepRows(step) {
   const rows = [];
-  const hasSubtasks = Array.isArray(step.subtasks) && step.subtasks.length > 0;
+  const hasSubtasks = step.subtasks.length > 0;
   let numCell;
   let remaining = step.remaining;
   if (hasSubtasks) {
-    const { done, total } = subtaskCounts(step);
+    const done = step.subtasks.filter((s) => s.status === 'Terminé').length;
     const open = state.openSteps.has(step.id);
     numCell = el('button', {
       class: 'toggle', type: 'button', 'data-id': step.id, 'aria-expanded': String(open),
       title: 'Afficher ou masquer les sous-tâches',
     }, step.num);
-    remaining = `[${done}/${total}] ${step.remaining}`;
+    remaining = `[${done}/${step.subtasks.length}] ${step.remaining}`;
   } else {
     numCell = document.createTextNode(step.num);
   }
   rows.push(el('tr', { class: step.status === 'Terminé' ? 'finished' : '' },
     el('td', { class: 'num' }, numCell),
     el('td', { class: 'status' }, statusCell(step.status)),
-    el('td', { class: 'time' }, step.temps),
+    el('td', { class: 'time' }, bracketTime(step.load)),
     el('td', {}, step.step),
     el('td', {}, remaining),
     el('td', {}, step.owner)));
@@ -312,79 +350,71 @@ function stepRows(step) {
     const sub = el('tr', { class: 'subtasks', 'data-sub': step.id },
       el('td', { colspan: '6' },
         el('ul', {}, ...step.subtasks.map((s) => el('li', { class: s.status === 'Terminé' ? 'finished' : '' },
-          dot(s.status), `${s.n} · ${s.label}`)))));
+          el('span', { class: 'sub-status' }, statusCell(s.status)),
+          el('span', { class: 'sub-time' }, bracketTime(s.estimate_min)),
+          el('span', {}, `${s.n} · ${s.label}`))))));
     sub.hidden = !state.openSteps.has(step.id);
     rows.push(sub);
   }
   return rows;
 }
 
-function renderProjects(steps) {
-  const groups = new Map();
-  for (const step of steps) {
-    if (!groups.has(step.project_id)) groups.set(step.project_id, []);
-    groups.get(step.project_id).push(step);
-  }
-  const ordered = [...groups.values()].sort((a, b) => a[0].project_order - b[0].project_order);
+function renderProjects(projects, steps) {
   // Two independent columns (projects alternate between them), so an open accordion never
   // pushes down its neighbour. The CSS "order" keeps the reading order on a single column.
   const columns = [el('div', { class: 'col' }), el('div', { class: 'col' })];
   const grid = el('div', { class: 'projects' }, ...columns);
-  ordered.forEach((group, index) => {
-    group.sort((a, b) => a.step_order - b.step_order);
+  projects.forEach((project, index) => {
+    const group = steps.filter((s) => s.project_id === project.id).sort((a, b) => a.step_order - b.step_order);
     const done = group.filter((s) => s.status === 'Terminé').length;
-    const pct = (done / group.length) * 100;
-    const projectId = group[0].project_id;
+    const pct = group.length ? (done / group.length) * 100 : 0;
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
-    const accordion = el('details', { class: 'card project', 'data-project': projectId },
+    const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
-        el('div', { class: 'project-head' }, el('h2', {}, group[0].project), el('span', {}, `${done} / ${group.length} terminées`)),
+        el('div', { class: 'project-head' }, el('h2', {}, project.name), el('span', {}, `${done} / ${group.length} terminées`)),
         el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
         el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Étape', 'Reste à faire', 'Qui'].map((t) => el('th', {}, t)))),
         el('tbody', {}, ...group.flatMap(stepRows))));
-    accordion.open = state.openProjects.has(projectId);
+    accordion.open = state.openProjects.has(project.id);
     accordion.style.order = index;
     columns[index % 2].append(accordion);
   });
   return grid;
 }
 
-// "Fait" section: every finished step, newest first. A missing done_date is shown as
+// "Fait" section: every finished sub-task, newest first. A missing done_date is shown as
 // "non datée" at the end of the list, without any error banner.
 function renderDone(steps) {
-  const finished = steps.filter((s) => s.status === 'Terminé');
-  const dated = finished.filter((s) => s.done_date)
-    .sort((a, b) => b.done_date.localeCompare(a.done_date) || b.num - a.num);
-  const undated = finished.filter((s) => !s.done_date).sort((a, b) => b.num - a.num);
-  const rows = [...dated, ...undated].map((s) => el('tr', {},
-    el('td', { class: 'time' }, s.done_date ? (s.done_date_est ? '≈ ' : '') + s.done_date : 'non datée'),
-    el('td', { class: 'num' }, s.num),
-    el('td', {}, s.step),
-    el('td', {}, s.project)));
+  const finished = steps.flatMap((step) => step.subtasks.filter((s) => s.status === 'Terminé').map((sub) => ({ sub, step })));
+  const byNumberDesc = (a, b) => compareNumbers(b.sub.n, a.sub.n);
+  const dated = finished.filter((r) => r.sub.done_date)
+    .sort((a, b) => b.sub.done_date.localeCompare(a.sub.done_date) || byNumberDesc(a, b));
+  const undated = finished.filter((r) => !r.sub.done_date).sort(byNumberDesc);
+  const rows = [...dated, ...undated].map(({ sub, step }) => el('tr', {},
+    el('td', { class: 'time' }, sub.done_date ? (step.done_date_est ? '≈ ' : '') + sub.done_date : 'non datée'),
+    el('td', { class: 'num' }, sub.n),
+    el('td', {}, sub.label, el('div', { class: 'parent' }, parentLabel(step)))));
   const details = el('details', { class: 'card project', 'data-project': 'done-section' },
     el('summary', {},
-      el('div', { class: 'project-head' }, el('h2', {}, `Fait (${finished.length} étapes)`))),
+      el('div', { class: 'project-head' }, el('h2', {}, `Fait (${finished.length} sous-tâches)`))),
     el('table', {},
-      el('thead', {}, el('tr', {}, ...['Date', 'N°', 'Étape', 'Projet'].map((t) => el('th', {}, t)))),
+      el('thead', {}, el('tr', {}, ...['Date', 'N°', 'Intitulé'].map((t) => el('th', {}, t)))),
       el('tbody', {}, ...rows)));
   details.open = state.openProjects.has('done-section');
   return details;
 }
 
 function render() {
-  const { roadmap } = state.data;
-  const today = state.data.today ?? [];
-  const history = state.data.history ?? [];
-  const info = state.data.info ?? [];
-  const stats = computeStats(roadmap);
+  const model = buildModel(state.data.global);
+  const stats = computeStats(model.steps);
   const app = document.getElementById('app');
   app.replaceChildren(
-    el('div', { class: 'top-row' }, renderHeader(stats, info), renderGlobal(stats)),
-    renderChart(history),
-    renderToday(today),
-    renderProjects(roadmap),
-    renderDone(roadmap));
+    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(stats)),
+    renderChart(model.history),
+    renderToday(model.steps),
+    renderProjects(model.projects, model.steps),
+    renderDone(model.steps));
 }
 
 // Sub-task toggles: delegated, and the open set survives the periodic re-render.
