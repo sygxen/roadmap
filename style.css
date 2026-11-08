@@ -99,7 +99,23 @@ h2 { margin: 0 0 12px; font-size: 18px; }
   padding: 4px 8px; border-radius: 6px; font-size: 12px; white-space: nowrap;
 }
 
-.projects { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.top-row { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 900px) { .top-row { grid-template-columns: 1fr 1fr; } }
+.top-row .card { margin-bottom: 16px; }
+
+details.project > summary {
+  list-style: none; cursor: pointer; display: block;
+}
+details.project > summary::-webkit-details-marker { display: none; }
+details.project > summary h2 { margin: 0; }
+details.project > summary h2::before {
+  content: "▸"; display: inline-block; width: 1.1em; color: var(--muted); transition: transform .15s;
+}
+details.project[open] > summary h2::before { transform: rotate(90deg); }
+details.project[open] > summary { margin-bottom: 12px; }
+details.project > summary .bar { margin-bottom: 0; }
+
+.projects { display: grid; grid-template-columns: 1fr; gap: 16px; align-items: start; }
 @media (min-width: 1100px) { .projects { grid-template-columns: 1fr 1fr; } }
 .projects .card { margin-bottom: 0; }
 .project-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }

@@ -4,6 +4,7 @@
 // Static page, no framework. All data is inserted with textContent (never innerHTML).
 
 const REFRESH_MS = 30000;
+const RETRY_MS = 3000;
 const FILES = ['roadmap', 'today', 'history', 'info'];
 
 // Optional ?data=<folder> lets a test copy of the data be served (never C's real files).
@@ -24,6 +25,8 @@ const state = {
   signature: {},     // JSON text of the last valid version, to skip needless re-renders
   failingSince: {},  // file name -> Date of the first failure in the current streak
   openSteps: new Set(),
+  openProjects: new Set(),
+  retryTimer: null,
 };
 
 // ---------- helpers ----------
@@ -94,6 +97,10 @@ async function refresh() {
     }
   });
   showBanner();
+  // A file caught mid-write by its author is usually fine a moment later: retry soon, not in 30 s.
+  if (Object.keys(state.failingSince).length && !state.retryTimer) {
+    state.retryTimer = setTimeout(() => { state.retryTimer = null; refresh(); }, RETRY_MS);
+  }
   // Render as soon as the main file is valid; a missing secondary file shows as an empty section.
   if (changed && state.data.roadmap) render();
 }
@@ -323,12 +330,17 @@ function renderProjects(steps) {
     group.sort((a, b) => a.step_order - b.step_order);
     const done = group.filter((s) => s.status === 'Terminé').length;
     const pct = (done / group.length) * 100;
-    grid.append(el('section', { class: 'card' },
-      el('div', { class: 'project-head' }, el('h2', {}, group[0].project), el('span', {}, `${done} / ${group.length} terminées`)),
-      el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` })),
+    const projectId = group[0].project_id;
+    // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
+    const accordion = el('details', { class: 'card project', 'data-project': projectId },
+      el('summary', {},
+        el('div', { class: 'project-head' }, el('h2', {}, group[0].project), el('span', {}, `${done} / ${group.length} terminées`)),
+        el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
         el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Étape', 'Reste à faire', 'Qui'].map((t) => el('th', {}, t)))),
-        el('tbody', {}, ...group.flatMap(stepRows)))));
+        el('tbody', {}, ...group.flatMap(stepRows))));
+    accordion.open = state.openProjects.has(projectId);
+    grid.append(accordion);
   }
   return grid;
 }
@@ -341,8 +353,7 @@ function render() {
   const stats = computeStats(roadmap);
   const app = document.getElementById('app');
   app.replaceChildren(
-    renderHeader(stats, info),
-    renderGlobal(stats),
+    el('div', { class: 'top-row' }, renderHeader(stats, info), renderGlobal(stats)),
     renderChart(history),
     renderToday(today),
     renderProjects(roadmap));
@@ -359,6 +370,14 @@ document.addEventListener('click', (event) => {
   const row = [...document.querySelectorAll('tr[data-sub]')].find((r) => r.dataset.sub === id);
   if (row) row.hidden = !open;
 });
+
+// The 'toggle' event does not bubble, so listen in the capture phase to remember open accordions.
+document.addEventListener('toggle', (event) => {
+  const details = event.target;
+  if (!(details instanceof HTMLDetailsElement) || !details.dataset.project) return;
+  if (details.open) state.openProjects.add(details.dataset.project);
+  else state.openProjects.delete(details.dataset.project);
+}, true);
 
 refresh();
 setInterval(refresh, REFRESH_MS);
