@@ -346,6 +346,28 @@ function renderProjects(steps) {
   return grid;
 }
 
+// "Fait" section: every finished step, newest first. A missing done_date is shown as
+// "non datée" at the end of the list, without any error banner.
+function renderDone(steps) {
+  const finished = steps.filter((s) => s.status === 'Terminé');
+  const dated = finished.filter((s) => s.done_date)
+    .sort((a, b) => b.done_date.localeCompare(a.done_date) || b.num - a.num);
+  const undated = finished.filter((s) => !s.done_date).sort((a, b) => b.num - a.num);
+  const rows = [...dated, ...undated].map((s) => el('tr', {},
+    el('td', { class: 'time' }, s.done_date ? (s.done_date_est ? '≈ ' : '') + s.done_date : 'non datée'),
+    el('td', { class: 'num' }, s.num),
+    el('td', {}, s.step),
+    el('td', {}, s.project)));
+  const details = el('details', { class: 'card project', 'data-project': 'done-section' },
+    el('summary', {},
+      el('div', { class: 'project-head' }, el('h2', {}, `Fait (${finished.length} étapes)`))),
+    el('table', {},
+      el('thead', {}, el('tr', {}, ...['Date', 'N°', 'Étape', 'Projet'].map((t) => el('th', {}, t)))),
+      el('tbody', {}, ...rows)));
+  details.open = state.openProjects.has('done-section');
+  return details;
+}
+
 function render() {
   const { roadmap } = state.data;
   const today = state.data.today ?? [];
@@ -357,7 +379,8 @@ function render() {
     el('div', { class: 'top-row' }, renderHeader(stats, info), renderGlobal(stats)),
     renderChart(history),
     renderToday(today),
-    renderProjects(roadmap));
+    renderProjects(roadmap),
+    renderDone(roadmap));
 }
 
 // Sub-task toggles: delegated, and the open set survives the periodic re-render.
