@@ -156,3 +156,5 @@ tr.subtasks li.finished { opacity: .5; }
 
 .total { margin-top: 8px; text-align: right; color: var(--muted); font-size: 13px; }
 .loading { color: var(--muted); }
+
+.milestones h2 { margin: 0 0 8px; font-size: 16px; }

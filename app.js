@@ -146,7 +146,8 @@ function buildModel(global) {
     return { ...step, subtasks, load };
   });
   const projects = [...global.projects].sort((a, b) => a.order - b.order);
-  return { info: global.info ?? {}, history: global.history ?? [], projects, steps };
+  const milestones = Array.isArray(global.milestones) ? global.milestones : [];
+  return { info: global.info ?? {}, history: global.history ?? [], projects, steps, milestones };
 }
 
 function computeStats(steps) {
@@ -373,6 +374,33 @@ function stepRows(step) {
   return rows;
 }
 
+// Milestones: one row each, in file order. An empty "steps" list means "every step no other
+// milestone lists". The percentage is finished sub-tasks over all sub-tasks of those steps.
+function renderMilestones(milestones, steps) {
+  if (!milestones.length) return null;
+  const listed = new Set(milestones.flatMap((m) => m.steps ?? []));
+  const rows = milestones.map((m) => {
+    const wanted = m.steps ?? [];
+    const group = wanted.length
+      ? steps.filter((s) => wanted.includes(s.num))
+      : steps.filter((s) => !listed.has(s.num));
+    const subs = group.flatMap((s) => s.subtasks);
+    const done = subs.filter((s) => s.status === 'Terminé').length;
+    const pct = subs.length ? (done / subs.length) * 100 : 0;
+    return el('tr', {},
+      el('td', {}, m.name),
+      el('td', {}, statusCell(m.status)),
+      el('td', { class: 'time' }, m.date || ''),
+      el('td', { class: 'time' }, subs.length ? `${formatNumber(pct, 0)} %` : '—'),
+      el('td', { class: 'time' }, `${done} / ${subs.length}`));
+  });
+  return el('section', { class: 'card milestones' },
+    el('h2', {}, 'Milestones'),
+    el('table', {},
+      el('thead', {}, el('tr', {}, ...['Milestone', 'Statut', 'Date', 'Avancement', 'Tâches'].map((t) => el('th', {}, t)))),
+      el('tbody', {}, ...rows)));
+}
+
 function renderProjects(projects, steps) {
   // Two independent columns (projects alternate between them), so an open accordion never
   // pushes down its neighbour. The CSS "order" keeps the reading order on a single column.
@@ -424,12 +452,13 @@ function render() {
   const model = buildModel(state.data.global);
   const stats = computeStats(model.steps);
   const app = document.getElementById('app');
-  app.replaceChildren(
+  app.replaceChildren(...[
     el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(stats)),
+    renderMilestones(model.milestones, model.steps),
     renderChart(model.history),
     renderToday(model.steps),
     renderProjects(model.projects, model.steps),
-    renderDone(model.steps));
+    renderDone(model.steps)].filter(Boolean));
 }
 
 // Sub-task toggles: delegated, and the open set survives the periodic re-render.
