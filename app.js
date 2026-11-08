@@ -180,7 +180,8 @@ function metric(title, big, detail, pct) {
 function renderGlobal(stats) {
   const hours = (min) => formatMinutes(min).replace(':', ' h ') + ' min';
   return el('section', { class: 'card' },
-    el('h2', {}, 'Avancement global (hors « Plus tard »)'),
+    el('h2', { class: 'with-icon' }, el('img', { src: 'icon-progress.svg', alt: '', width: '28', height: '28' }),
+      'Avancement global (hors « Plus tard »)'),
     el('div', { class: 'metrics' },
       metric('En étapes terminées', `${formatNumber(stats.pctSteps, 1)} %`,
         `${stats.done} sur ${stats.base}`, stats.pctSteps),

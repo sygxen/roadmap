@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#1f3a8a"/>
+  <!-- Three rising bars: two complete (green), one in progress (orange), on a baseline -->
+  <rect x="12" y="38" width="10" height="14" rx="2.5" fill="#3ec27a"/>
+  <rect x="27" y="26" width="10" height="26" rx="2.5" fill="#3ec27a"/>
+  <rect x="42" y="12" width="10" height="40" rx="2.5" fill="#f0a030"/>
+  <rect x="9" y="54" width="46" height="3" rx="1.5" fill="#ffffff"/>
+</svg>

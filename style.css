@@ -43,6 +43,8 @@ main { max-width: 1400px; margin: 0 auto; padding: 24px 16px 48px; }
 
 h1 { margin: 0 0 4px; font-size: 28px; display: flex; align-items: center; gap: 12px; }
 h1 img { flex: none; }
+h2.with-icon { display: flex; align-items: center; gap: 10px; }
+h2.with-icon img { flex: none; }
 h2 { margin: 0 0 12px; font-size: 18px; }
 .subtitle { margin: 0 0 16px; color: var(--muted); }
 
