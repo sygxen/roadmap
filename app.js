@@ -27,6 +27,7 @@ const state = {
   openSteps: new Set(),
   openProjects: new Set(),
   retryTimer: null,
+  renderedDay: null,
 };
 
 // ---------- helpers ----------
@@ -119,7 +120,9 @@ async function refresh() {
   if (Object.keys(state.failingSince).length && !state.retryTimer) {
     state.retryTimer = setTimeout(() => { state.retryTimer = null; refresh(); }, RETRY_MS);
   }
-  if (changed && state.data.global) render();
+  // Also re-render when the day changes, since the day's list depends on today's date.
+  const dayChanged = state.renderedDay !== localIsoDate();
+  if ((changed || dayChanged) && state.data.global) render();
 }
 
 function showBanner() {
@@ -305,10 +308,19 @@ function renderChart(history) {
 // Parent step shown in small text under a sub-task label.
 const parentLabel = (step) => `étape ${step.num} · ${step.step}`;
 
-// "Liste du jour": the sub-tasks that carry a `today` rank, in rank order.
+// Today's date in the viewer's time zone, as YYYY-MM-DD.
+function localIsoDate(date = new Date()) {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+// "Liste du jour": the unfinished sub-tasks whose today_date is today, in `today` order.
+// The `today` number is fixed for the day and shown as is, never renumbered.
 function renderToday(steps) {
+  const todayDate = localIsoDate();
   const rows = steps
-    .flatMap((step) => step.subtasks.filter((s) => s.today != null).map((sub) => ({ sub, step })))
+    .flatMap((step) => step.subtasks
+      .filter((s) => s.today != null && s.today_date === todayDate && s.status !== 'Terminé')
+      .map((sub) => ({ sub, step })))
     .sort((a, b) => a.sub.today - b.sub.today);
   const totalMin = sum(rows, (r) => r.sub.estimate_min);
   const table = el('table', {},
@@ -321,7 +333,7 @@ function renderToday(steps) {
       el('td', {}, sub.owner)))));
   return el('section', { class: 'card' },
     el('h2', {}, 'Liste du jour'),
-    table,
+    rows.length ? table : el('p', { class: 'loading' }, 'Aucune tâche prévue aujourd’hui.'),
     el('p', { class: 'total' }, `Temps total : ${formatMinutes(totalMin)}`));
 }
 
@@ -408,6 +420,7 @@ function renderDone(steps) {
 }
 
 function render() {
+  state.renderedDay = localIsoDate();
   const model = buildModel(state.data.global);
   const stats = computeStats(model.steps);
   const app = document.getElementById('app');
