@@ -326,8 +326,11 @@ function renderProjects(steps) {
     groups.get(step.project_id).push(step);
   }
   const ordered = [...groups.values()].sort((a, b) => a[0].project_order - b[0].project_order);
-  const grid = el('div', { class: 'projects' });
-  for (const group of ordered) {
+  // Two independent columns (projects alternate between them), so an open accordion never
+  // pushes down its neighbour. The CSS "order" keeps the reading order on a single column.
+  const columns = [el('div', { class: 'col' }), el('div', { class: 'col' })];
+  const grid = el('div', { class: 'projects' }, ...columns);
+  ordered.forEach((group, index) => {
     group.sort((a, b) => a.step_order - b.step_order);
     const done = group.filter((s) => s.status === 'Terminé').length;
     const pct = (done / group.length) * 100;
@@ -341,8 +344,9 @@ function renderProjects(steps) {
         el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Étape', 'Reste à faire', 'Qui'].map((t) => el('th', {}, t)))),
         el('tbody', {}, ...group.flatMap(stepRows))));
     accordion.open = state.openProjects.has(projectId);
-    grid.append(accordion);
-  }
+    accordion.style.order = index;
+    columns[index % 2].append(accordion);
+  });
   return grid;
 }
 
