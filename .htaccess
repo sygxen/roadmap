@@ -1,0 +1,9 @@
+# Loopback only: the data contains infrastructure details.
+# "Require local" is not used because it also accepts the server's own LAN address.
+Require ip 127.0.0.1 ::1
+Options -Indexes
+
+# Always revalidate, so edits to the page and the data show up on the next load.
+<IfModule mod_headers.c>
+  Header set Cache-Control "no-cache"
+</IfModule>
