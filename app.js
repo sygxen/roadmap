@@ -230,8 +230,10 @@ function renderGlobal(stats) {
 
 function renderChart(history) {
   const card = el('section', { class: 'card chart' }, el('h2', {}, 'Progression jour par jour'));
+  // Daily value: share of finished sub-tasks when the record has them, else the step percentage.
+  const dailyValue = (h) => (h.sub_base ? (h.sub_done / h.sub_base) * 100 : h.pct);
   const points = history
-    .map((h) => ({ x: dayOf(h.date), y: h.pct, h }))
+    .map((h) => ({ x: dayOf(h.date), y: dailyValue(h), h }))
     .sort((a, b) => a.x - b.x);
   if (points.length === 0) return card;
 
@@ -253,7 +255,7 @@ function renderChart(history) {
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'Courbe du pourcentage d’étapes terminées par jour');
+  svg.setAttribute('aria-label', 'Courbe du pourcentage de sous-tâches terminées par jour');
   const add = (tag, attrs, text) => {
     const node = document.createElementNS(NS, tag);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
@@ -278,8 +280,8 @@ function renderChart(history) {
   const tooltip = document.getElementById('tooltip');
   for (const p of points) {
     const circle = add('circle', { class: 'pt', cx: sx(p.x), cy: sy(p.y), r: 5 });
-    let text = `${p.h.date} : ${formatNumber(p.y, 1)} % (${p.h.done} sur ${p.h.base})`;
-    if (p.h.sub_base) text += ` · sous-tâches ${p.h.sub_done} sur ${p.h.sub_base}`;
+    const counts = p.h.sub_base ? `${p.h.sub_done} sur ${p.h.sub_base}` : `${p.h.done} sur ${p.h.base}`;
+    const text = `${p.h.date} : ${formatNumber(p.y, 1)} % (${counts})`;
     circle.addEventListener('mousemove', (event) => {
       tooltip.hidden = false;
       tooltip.textContent = text;
@@ -294,7 +296,7 @@ function renderChart(history) {
   if (projectedDay !== null) {
     forecast = `Au rythme actuel (${formatNumber(fit.slope, 2)} point par jour), 100 % serait atteint le ${isoOf(projectedDay)}`;
   } else {
-    forecast = 'Projection à 100 % indisponible : la tendance n’est pas à la hausse.';
+    forecast = 'projection impossible pour l’instant';
   }
   card.append(el('p', { class: 'forecast' }, forecast));
   return card;
