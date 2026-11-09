@@ -182,3 +182,5 @@ tr.subtasks li.finished { opacity: .5; }
 .badge.sprint-5 { background: var(--sprint-5); }
 .badge.sprint-6 { background: var(--sprint-6); }
 .badge.off-sprint { border: 1px solid var(--border); color: var(--muted); font-weight: 400; }
+
+.sub-n { font-weight: 600; color: var(--muted); }
