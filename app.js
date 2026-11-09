@@ -27,7 +27,6 @@ const state = {
   openSteps: new Set(),
   openProjects: new Set(),
   retryTimer: null,
-  renderedDay: null,
 };
 
 // ---------- helpers ----------
@@ -120,9 +119,7 @@ async function refresh() {
   if (Object.keys(state.failingSince).length && !state.retryTimer) {
     state.retryTimer = setTimeout(() => { state.retryTimer = null; refresh(); }, RETRY_MS);
   }
-  // Also re-render when the day changes, since the day's list depends on today's date.
-  const dayChanged = state.renderedDay !== localIsoDate();
-  if ((changed || dayChanged) && state.data.global) render();
+  if (changed && state.data.global) render();
 }
 
 function showBanner() {
@@ -328,19 +325,16 @@ function renderChart(allHistory, sprint) {
 // Parent step shown in small text under a sub-task label.
 const parentLabel = (step) => `étape ${step.num} · ${step.step}`;
 
-// Today's date in the viewer's time zone, as YYYY-MM-DD.
-function localIsoDate(date = new Date()) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-// "Liste du jour": the unfinished sub-tasks whose today_date is today, in `today` order.
-// The `today` number is fixed for the day and shown as is, never renumbered.
+// "Liste du ...": the latest list present in the file (greatest today_date), finished sub-tasks
+// included, in `today` order. It never disappears when the date changes: only the file's author
+// starts a new list. The `today` number is shown as is, never renumbered.
 function renderToday(steps) {
-  const todayDate = localIsoDate();
-  const rows = steps
-    .flatMap((step) => step.subtasks
-      .filter((s) => s.today != null && s.today_date === todayDate && s.status !== 'Terminé')
-      .map((sub) => ({ sub, step })))
+  const dated = steps.flatMap((step) => step.subtasks
+    .filter((s) => s.today != null && s.today_date)
+    .map((sub) => ({ sub, step })));
+  const listDate = dated.reduce((max, r) => (r.sub.today_date > max ? r.sub.today_date : max), '');
+  const rows = dated
+    .filter((r) => r.sub.today_date === listDate)
     .sort((a, b) => a.sub.today - b.sub.today);
   const totalMin = sum(rows, (r) => r.sub.estimate_min);
   const table = el('table', {},
@@ -352,8 +346,8 @@ function renderToday(steps) {
       el('td', {}, sub.label, el('div', { class: 'parent' }, parentLabel(step))),
       el('td', {}, sub.owner)))));
   return el('section', { class: 'card' },
-    el('h2', {}, 'Liste du jour'),
-    rows.length ? table : el('p', { class: 'loading' }, 'Aucune tâche prévue aujourd’hui.'),
+    el('h2', {}, listDate ? `Liste du ${listDate}` : 'Liste du jour'),
+    rows.length ? table : el('p', { class: 'loading' }, 'Aucune liste du jour pour l’instant.'),
     el('p', { class: 'total' }, `Temps total : ${formatMinutes(totalMin)}`));
 }
 
@@ -474,17 +468,16 @@ function renderDone(steps) {
 }
 
 function render() {
-  state.renderedDay = localIsoDate();
   const model = buildModel(state.data.global);
   const stats = computeStats(model.steps);
   const sprintStats = computeStats(model.steps.filter((s) => inSprint(s, model.sprint)));
   const app = document.getElementById('app');
   app.replaceChildren(...[
     el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(sprintStats, model.sprint)),
-    renderMilestones(model.milestones, model.steps),
     renderChart(model.history, model.sprint),
     renderToday(model.steps),
     renderProjects(model.projects, model.steps),
+    renderMilestones(model.milestones, model.steps),
     renderDone(model.steps)].filter(Boolean));
 }
 
