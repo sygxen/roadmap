@@ -184,3 +184,4 @@ tr.subtasks li.finished { opacity: .5; }
 .badge.off-sprint { border: 1px solid var(--border); color: var(--muted); font-weight: 400; }
 
 .sub-n { font-weight: 600; color: var(--muted); }
+.dot.blocked { background: var(--red); border-color: var(--red); }

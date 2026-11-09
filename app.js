@@ -16,6 +16,7 @@ const STATUS_CLASS = {
   'En cours': 'doing',
   'À faire': 'todo',
   'En pause': 'pause',
+  'Bloqué': 'blocked',
   'Plus tard': 'later',
   'À renseigner': 'tbd',
 };
@@ -169,6 +170,7 @@ function computeStats(steps) {
     doing: count('En cours'),
     todo: count('À faire'),
     later: count('Plus tard'),
+    blocked: count('Bloqué'),
     pauseOrTbd: count('En pause') + count('À renseigner'),
     stepsBase: counted.length,
     stepsDone,
@@ -209,7 +211,7 @@ function renderHeader(stats, info) {
     el('p', { class: 'subtitle' }, `Version ${info.version ?? '?'}, mise à jour le ${info.date ?? '?'}`),
     el('p', { class: 'summary' },
       `${stats.finished} étapes terminées sur ${stats.total}, ${stats.doing} en cours, ${stats.todo} à faire, ` +
-      `${stats.later} plus tard, ${stats.pauseOrTbd} à renseigner ou en pause`),
+      `${stats.later} plus tard, ${stats.blocked} bloquée${stats.blocked > 1 ? 's' : ''}, ${stats.pauseOrTbd} à renseigner ou en pause`),
     legend);
 }
 
@@ -329,9 +331,19 @@ const parentLabel = (step) => `étape ${step.num} · ${step.step}`;
 // included, in `today` order. It never disappears when the date changes: only the file's author
 // starts a new list. The `today` number is shown as is, never renumbered.
 function renderToday(steps) {
-  const dated = steps.flatMap((step) => step.subtasks
-    .filter((s) => s.today != null && s.today_date)
-    .map((sub) => ({ sub, step })));
+  // A task is a sub-task, or a whole step that carries today / today_date itself (a step without
+  // sub-task): that step then stands in for its own sub-task and shows no parent line.
+  const dated = steps.flatMap((step) => [
+    ...step.subtasks.filter((s) => s.today != null && s.today_date).map((sub) => ({ sub, step })),
+    ...(step.today != null && step.today_date ? [{
+      sub: {
+        today: step.today, today_date: step.today_date, status: step.status,
+        estimate_min: step.load, label: step.step, n: step.num, owner: step.owner,
+      },
+      step,
+      isStep: true,
+    }] : []),
+  ]);
   const listDate = dated.reduce((max, r) => (r.sub.today_date > max ? r.sub.today_date : max), '');
   const rows = dated
     .filter((r) => r.sub.today_date === listDate)
@@ -339,12 +351,12 @@ function renderToday(steps) {
   const totalMin = sum(rows, (r) => r.sub.estimate_min);
   const table = el('table', {},
     el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Tâche', 'Qui'].map((t) => el('th', {}, t)))),
-    el('tbody', {}, ...rows.map(({ sub, step }) => el('tr', { class: sub.status === 'Terminé' ? 'finished' : '' },
+    el('tbody', {}, ...rows.map(({ sub, step, isStep }) => el('tr', { class: sub.status === 'Terminé' ? 'finished' : '' },
       el('td', { class: 'num' }, sub.today),
       el('td', { class: 'status' }, statusCell(sub.status)),
       el('td', { class: 'time' }, bracketTime(sub.estimate_min)),
       el('td', {}, el('span', { class: 'sub-n' }, `#${sub.n}`), ' ', sub.label,
-        el('div', { class: 'parent' }, parentLabel(step))),
+        isStep ? null : el('div', { class: 'parent' }, parentLabel(step))),
       el('td', {}, sub.owner)))));
   return el('section', { class: 'card' },
     el('h2', {}, listDate ? `Liste du ${listDate}` : 'Liste du jour'),
