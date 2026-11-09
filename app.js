@@ -343,7 +343,8 @@ function renderToday(steps) {
       el('td', { class: 'num' }, sub.today),
       el('td', { class: 'status' }, statusCell(sub.status)),
       el('td', { class: 'time' }, bracketTime(sub.estimate_min)),
-      el('td', {}, sub.label, el('div', { class: 'parent' }, parentLabel(step))),
+      el('td', {}, el('span', { class: 'sub-n' }, `#${sub.n}`), ' ', sub.label,
+        el('div', { class: 'parent' }, parentLabel(step))),
       el('td', {}, sub.owner)))));
   return el('section', { class: 'card' },
     el('h2', {}, listDate ? `Liste du ${listDate}` : 'Liste du jour'),
