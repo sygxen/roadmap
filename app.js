@@ -1,6 +1,6 @@
 'use strict';
 
-// Road map page: reads global.json (format 2), written by another assistant, and renders it.
+// Road map page: reads global.json (format 2, sprint field since version 109), written by another assistant, and renders it.
 // Static page, no framework. All data is inserted with textContent (never innerHTML).
 
 const REFRESH_MS = 30000;
@@ -147,8 +147,15 @@ function buildModel(global) {
   });
   const projects = [...global.projects].sort((a, b) => a.order - b.order);
   const milestones = Array.isArray(global.milestones) ? global.milestones : [];
-  return { info: global.info ?? {}, history: global.history ?? [], projects, steps, milestones };
+  // Current sprint = highest sprint number any step carries (steps outside any sprint have null).
+  const sprint = Math.max(0, ...steps.map((s) => s.sprint ?? 0));
+  return { info: global.info ?? {}, history: global.history ?? [], projects, steps, milestones, sprint };
 }
+
+// Percentages count the current sprint only. Out-of-sprint steps stay visible but are never counted.
+const inSprint = (step, sprint) => sprint > 0 && step.sprint === sprint;
+// History entries written before the sprint field existed belong to sprint 1.
+const entrySprint = (entry) => entry.sprint ?? 1;
 
 function computeStats(steps) {
   const count = (status) => steps.filter((s) => s.status === status).length;
@@ -217,11 +224,15 @@ function metric(title, big, detail, pct) {
     el('div', { class: 'detail' }, detail));
 }
 
-function renderGlobal(stats) {
+function outOfSprintBadge() {
+  return el('span', { class: 'badge off-sprint' }, 'hors sprint');
+}
+
+function renderGlobal(stats, sprint) {
   const hours = (min) => formatMinutes(min).replace(':', ' h ') + ' min';
   return el('section', { class: 'card' },
     el('h2', { class: 'with-icon' }, el('img', { src: 'icon-progress.svg', alt: '', width: '28', height: '28' }),
-      'Avancement global (hors « Plus tard »)'),
+      'Avancement global', sprint ? el('span', { class: 'badge sprint' }, `Sprint ${sprint}`) : null),
     el('div', { class: 'metrics' },
       metric('En étapes terminées', `${formatNumber(stats.pctSteps, 1)} %`,
         `${stats.stepsDone} sur ${stats.stepsBase}`, stats.pctSteps),
@@ -232,7 +243,8 @@ function renderGlobal(stats) {
         stats.pctTime)));
 }
 
-function renderChart(history) {
+function renderChart(allHistory, sprint) {
+  const history = allHistory.filter((h) => entrySprint(h) === sprint);
   const card = el('section', { class: 'card chart' }, el('h2', {}, 'Progression jour par jour'));
   // Daily value: share of finished sub-tasks when the record has them, else the step percentage.
   const dailyValue = (h) => (h.sub_base ? (h.sub_done / h.sub_base) * 100 : h.pct);
@@ -358,7 +370,7 @@ function stepRows(step) {
     el('td', { class: 'num' }, numCell),
     el('td', { class: 'status' }, statusCell(step.status)),
     el('td', { class: 'time' }, bracketTime(step.load)),
-    el('td', {}, step.step),
+    el('td', {}, step.step, step.sprint == null ? outOfSprintBadge() : null),
     el('td', {}, remaining),
     el('td', {}, step.owner)));
   if (hasSubtasks) {
@@ -413,7 +425,8 @@ function renderProjects(projects, steps) {
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
-        el('div', { class: 'project-head' }, el('h2', {}, project.name), el('span', {}, `${done} / ${group.length} terminées`)),
+        el('div', { class: 'project-head' }, el('h2', {}, project.name, group.some((s) => s.sprint != null) ? null : outOfSprintBadge()),
+          el('span', {}, `${done} / ${group.length} terminées`)),
         el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
         el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Étape', 'Reste à faire', 'Qui'].map((t) => el('th', {}, t)))),
@@ -451,11 +464,12 @@ function render() {
   state.renderedDay = localIsoDate();
   const model = buildModel(state.data.global);
   const stats = computeStats(model.steps);
+  const sprintStats = computeStats(model.steps.filter((s) => inSprint(s, model.sprint)));
   const app = document.getElementById('app');
   app.replaceChildren(...[
-    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(stats)),
+    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(sprintStats, model.sprint)),
     renderMilestones(model.milestones, model.steps),
-    renderChart(model.history),
+    renderChart(model.history, model.sprint),
     renderToday(model.steps),
     renderProjects(model.projects, model.steps),
     renderDone(model.steps)].filter(Boolean));

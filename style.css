@@ -158,3 +158,8 @@ tr.subtasks li.finished { opacity: .5; }
 .loading { color: var(--muted); }
 
 .milestones h2 { margin: 0 0 8px; font-size: 16px; }
+
+.badge { display: inline-block; margin-left: 10px; padding: 1px 8px; border-radius: 10px;
+  font-size: 12px; font-weight: 600; vertical-align: 2px; white-space: nowrap; }
+.badge.sprint { background: var(--accent); color: var(--card); }
+.badge.off-sprint { border: 1px solid var(--border); color: var(--muted); font-weight: 400; }
