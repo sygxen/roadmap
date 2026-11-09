@@ -224,6 +224,13 @@ function metric(title, big, detail, pct) {
     el('div', { class: 'detail' }, detail));
 }
 
+// One fixed colour per sprint number (palette in style.css, cycling after 6), so sprint 1
+// is the same colour on every card and every visit.
+const SPRINT_COLORS = 6;
+function sprintBadge(n) {
+  return el('span', { class: `badge sprint sprint-${((n - 1) % SPRINT_COLORS) + 1}` }, `Sprint ${n}`);
+}
+
 function outOfSprintBadge() {
   return el('span', { class: 'badge off-sprint' }, 'hors sprint');
 }
@@ -232,7 +239,7 @@ function renderGlobal(stats, sprint) {
   const hours = (min) => formatMinutes(min).replace(':', ' h ') + ' min';
   return el('section', { class: 'card' },
     el('h2', { class: 'with-icon' }, el('img', { src: 'icon-progress.svg', alt: '', width: '28', height: '28' }),
-      'Avancement global', sprint ? el('span', { class: 'badge sprint' }, `Sprint ${sprint}`) : null),
+      'Avancement global', sprint ? sprintBadge(sprint) : null),
     el('div', { class: 'metrics' },
       metric('En étapes terminées', `${formatNumber(stats.pctSteps, 1)} %`,
         `${stats.stepsDone} sur ${stats.stepsBase}`, stats.pctSteps),
@@ -413,6 +420,12 @@ function renderMilestones(milestones, steps) {
       el('tbody', {}, ...rows)));
 }
 
+// One badge per sprint present in the project's steps, or "hors sprint" when it has none.
+function projectSprintBadges(group) {
+  const sprints = [...new Set(group.map((s) => s.sprint).filter((n) => n != null))].sort((a, b) => a - b);
+  return sprints.length ? sprints.map(sprintBadge) : [outOfSprintBadge()];
+}
+
 function renderProjects(projects, steps) {
   // Two independent columns (projects alternate between them), so an open accordion never
   // pushes down its neighbour. The CSS "order" keeps the reading order on a single column.
@@ -425,7 +438,7 @@ function renderProjects(projects, steps) {
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
-        el('div', { class: 'project-head' }, el('h2', {}, project.name, group.some((s) => s.sprint != null) ? null : outOfSprintBadge()),
+        el('div', { class: 'project-head' }, el('h2', {}, project.name, ...projectSprintBadges(group)),
           el('span', {}, `${done} / ${group.length} terminées`)),
         el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
