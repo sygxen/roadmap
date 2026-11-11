@@ -163,6 +163,27 @@ tr.subtasks li.finished { opacity: .5; }
 
 .badge { display: inline-block; margin-left: 10px; padding: 1px 8px; border-radius: 10px;
   font-size: 12px; font-weight: 600; vertical-align: 2px; white-space: nowrap; }
+.badge.sprint { color: var(--badge-text); }
+/* Sprint palette, indexed by sprint number. No green, orange or red (they mean done / in progress / blocked). */
+:root {
+  --sprint-1: #2f6fed; --sprint-2: #7c4dff; --sprint-3: #c2308f;
+  --sprint-4: #0f8fa8; --sprint-5: #8a5a44; --sprint-6: #4b5d73;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sprint-1: #6c9bff; --sprint-2: #a58bff; --sprint-3: #f070c0;
+    --sprint-4: #46c4dd; --sprint-5: #cf9a80; --sprint-6: #9fb2c9;
+  }
+}
+.badge.sprint-1 { background: var(--sprint-1); }
+.badge.sprint-2 { background: var(--sprint-2); }
+.badge.sprint-3 { background: var(--sprint-3); }
+.badge.sprint-4 { background: var(--sprint-4); }
+.badge.sprint-5 { background: var(--sprint-5); }
+.badge.sprint-6 { background: var(--sprint-6); }
+.badge.off-sprint { border: 1px solid var(--border); color: var(--muted); font-weight: 400; }
+.breadcrumb .badge, td .badge { margin-left: 0; }
+td .badge { margin-left: 8px; font-size: 11px; padding: 0 7px; }
 .badge.closed { background: var(--green); color: var(--badge-text); }
 :root { --badge-text: #ffffff; }
 @media (prefers-color-scheme: dark) { :root { --badge-text: #12161d; } }
@@ -176,8 +197,6 @@ tr.milestone-done td.time:nth-child(3) { color: var(--green); }
 
 .sprints { margin-left: 10px; font-size: 12px; font-weight: 400; color: var(--muted); }
 
-.scope { margin: -6px 0 10px; color: var(--muted); font-size: 12px; }
-.sprint-tag { margin-left: 6px; font-size: 11px; color: var(--muted); }
 
 .breadcrumb { display: flex; align-items: center; gap: 6px; padding: 8px 12px; }
 .breadcrumb button { font: inherit; cursor: pointer; color: var(--text); background: transparent;

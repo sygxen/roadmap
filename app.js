@@ -234,20 +234,31 @@ function metric(title, big, detail, pct) {
     el('div', { class: 'detail' }, detail));
 }
 
-function renderGlobal(stats) {
+// One fixed colour per sprint number (palette in style.css, cycling after 6): the same colour on the
+// breadcrumb, the "Fait" list and the sprint card. No sprint = neutral grey "hors sprint".
+const SPRINT_COLORS = 6;
+function sprintBadge(n, text) {
+  if (n == null) return el('span', { class: 'badge off-sprint' }, 'hors sprint');
+  return el('span', { class: `badge sprint sprint-${((n - 1) % SPRINT_COLORS) + 1}` }, text ?? `Sprint ${n}`);
+}
+
+// Main card: progress of the current sprint, i.e. its sub-tasks (finished ones keep the sprint they were done in).
+function renderGlobal(steps, sprint) {
+  const subs = steps.flatMap((step) => step.subtasks.filter((sub) => sprint > 0 && subSprint(sub, step) === sprint));
+  const done = subs.filter((sub) => sub.status === 'Terminé');
+  const totalMin = sum(subs, (sub) => sub.estimate_min);
+  const doneMin = sum(done, (sub) => sub.estimate_min);
+  const ratio = (a, b) => (b ? (a / b) * 100 : 0);
   const hours = (min) => formatMinutes(min).replace(':', ' h ') + ' min';
+  const pctSubs = ratio(done.length, subs.length);
+  const pctTime = ratio(doneMin, totalMin);
   return el('section', { class: 'card' },
     el('h2', { class: 'with-icon' }, el('img', { src: 'icon-progress.svg', alt: '', width: '28', height: '28' }),
-      'Avancement global'),
-    el('p', { class: 'scope' }, 'Tous sprints confondus, hors « Plus tard »'),
+      sprint ? `Sprint ${sprint}` : 'Avancement'),
     el('div', { class: 'metrics' },
-      metric('En étapes terminées', `${formatNumber(stats.pctSteps, 1)} %`,
-        `${stats.stepsDone} sur ${stats.stepsBase}`, stats.pctSteps),
-      metric('En sous-tâches terminées', `${formatNumber(stats.pctSubs, 1)} %`,
-        `${stats.subsDone} sur ${stats.subsBase}`, stats.pctSubs),
-      metric('En temps estimé', `${formatNumber(stats.pctTime, 1)} %`,
-        `${hours(stats.doneMin)} faites sur ${hours(stats.totalMin)}, reste ${hours(stats.totalMin - stats.doneMin)}`,
-        stats.pctTime)));
+      metric('En sous-tâches terminées', `${formatNumber(pctSubs, 1)} %`, `${done.length} sur ${subs.length}`, pctSubs),
+      metric('En temps estimé', `${formatNumber(pctTime, 1)} %`,
+        `${hours(doneMin)} faites sur ${hours(totalMin)}, reste ${hours(totalMin - doneMin)}`, pctTime)));
 }
 
 // Sprint breadcrumb: the current sprint and the 3 before it, each with its sub-task percentage.
@@ -276,7 +287,7 @@ function renderBreadcrumb(steps, current) {
       el('button', {
         class: 'crumb' + (n === selected ? ' selected' : ''), type: 'button', 'data-sprint': String(n),
         'aria-pressed': String(n === selected),
-      }, `S${n}`, pct ? el('span', { class: 'crumb-pct' }, pct) : null),
+      }, sprintBadge(n, `S${n}`), pct ? el('span', { class: 'crumb-pct' }, pct) : null),
     ];
   });
   return el('nav', { class: 'card breadcrumb', 'aria-label': 'Sprints' },
@@ -535,7 +546,7 @@ function doneDateCell(sub, step) {
   const date = sub.done_date ?? step.done_date;
   const text = date ? ((sub.done_date_est || step.done_date_est) ? '≈ ' : '') + date : 'non datée';
   const sprint = subSprint(sub, step);
-  return [text, sprint != null ? el('span', { class: 'sprint-tag' }, `S${sprint}`) : null];
+  return [text, sprintBadge(sprint, sprint != null ? `S${sprint}` : null)];
 }
 
 function renderDone(steps) {
@@ -565,7 +576,7 @@ function render() {
   const app = document.getElementById('app');
   app.replaceChildren(...[
     renderBreadcrumb(model.steps, model.sprint),
-    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(stats)),
+    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(model.steps, model.sprint)),
     renderChart(model.history, state.chartSprint ?? model.sprint),
     renderToday(model.steps),
     renderProjects(model.projects, model.steps),
