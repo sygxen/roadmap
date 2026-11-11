@@ -63,7 +63,8 @@ function formatMinutes(min) {
 }
 
 // Duration as shown in the "Temps" columns: [HH:MM]
-const bracketTime = (min) => `[${formatMinutes(min)}]`;
+// A task without estimate_min shows [--:--] instead of NaN.
+const bracketTime = (min) => (Number.isFinite(min) ? `[${formatMinutes(min)}]` : '[--:--]');
 
 function formatNumber(value, digits) {
   return value.toLocaleString('fr-FR', { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -223,22 +224,11 @@ function metric(title, big, detail, pct) {
     el('div', { class: 'detail' }, detail));
 }
 
-// One fixed colour per sprint number (palette in style.css, cycling after 6), so sprint 1
-// is the same colour on every card and every visit.
-const SPRINT_COLORS = 6;
-function sprintBadge(n) {
-  return el('span', { class: `badge sprint sprint-${((n - 1) % SPRINT_COLORS) + 1}` }, `Sprint ${n}`);
-}
-
-function outOfSprintBadge() {
-  return el('span', { class: 'badge off-sprint' }, 'hors sprint');
-}
-
-function renderGlobal(stats, sprint) {
+function renderGlobal(stats) {
   const hours = (min) => formatMinutes(min).replace(':', ' h ') + ' min';
   return el('section', { class: 'card' },
     el('h2', { class: 'with-icon' }, el('img', { src: 'icon-progress.svg', alt: '', width: '28', height: '28' }),
-      'Avancement global', sprint ? sprintBadge(sprint) : null),
+      'Avancement global'),
     el('div', { class: 'metrics' },
       metric('En étapes terminées', `${formatNumber(stats.pctSteps, 1)} %`,
         `${stats.stepsDone} sur ${stats.stepsBase}`, stats.pctSteps),
@@ -250,7 +240,9 @@ function renderGlobal(stats, sprint) {
 }
 
 function renderChart(allHistory, sprint) {
-  const history = allHistory.filter((h) => entrySprint(h) === sprint);
+  // A sprint opened today has no history yet: draw the latest earlier sprint that has some.
+  const chartSprint = Math.max(0, ...allHistory.map(entrySprint).filter((n) => n <= sprint));
+  const history = allHistory.filter((h) => entrySprint(h) === chartSprint);
   const card = el('section', { class: 'card chart' }, el('h2', {}, 'Progression jour par jour'));
   // Daily value: share of finished sub-tasks when the record has them, else the step percentage.
   const dailyValue = (h) => (h.sub_base ? (h.sub_done / h.sub_base) * 100 : h.pct);
@@ -384,7 +376,7 @@ function stepRows(step) {
     el('td', { class: 'num' }, numCell),
     el('td', { class: 'status' }, statusCell(step.status)),
     el('td', { class: 'time' }, bracketTime(step.load)),
-    el('td', {}, step.step, step.sprint == null ? outOfSprintBadge() : null),
+    el('td', {}, step.step),
     el('td', {}, remaining),
     el('td', {}, step.owner)));
   if (hasSubtasks) {
@@ -405,7 +397,10 @@ function stepRows(step) {
 function renderMilestones(milestones, steps) {
   if (!milestones.length) return null;
   const listed = new Set(milestones.flatMap((m) => m.steps ?? []));
-  const rows = milestones.map((m) => {
+  // Open milestones first, finished ones after (stable sort keeps the file order inside each group).
+  const isDone = (m) => m.status === 'Terminé';
+  const ordered = [...milestones].sort((a, b) => Number(isDone(a)) - Number(isDone(b)));
+  const rows = ordered.map((m) => {
     const wanted = m.steps ?? [];
     const group = wanted.length
       ? steps.filter((s) => wanted.includes(s.num))
@@ -413,10 +408,10 @@ function renderMilestones(milestones, steps) {
     const subs = group.flatMap((s) => s.subtasks);
     const done = subs.filter((s) => s.status === 'Terminé').length;
     const pct = subs.length ? (done / subs.length) * 100 : 0;
-    return el('tr', {},
+    return el('tr', { class: isDone(m) ? 'milestone-done' : '' },
       el('td', {}, m.name),
       el('td', {}, statusCell(m.status)),
-      el('td', { class: 'time' }, m.date || ''),
+      el('td', { class: 'time' }, isDone(m) && m.date ? `terminé le ${m.date}` : (m.date || '')),
       el('td', { class: 'time' }, subs.length ? `${formatNumber(pct, 0)} %` : '—'),
       el('td', { class: 'time' }, `${done} / ${subs.length}`));
   });
@@ -427,10 +422,17 @@ function renderMilestones(milestones, steps) {
       el('tbody', {}, ...rows)));
 }
 
-// One badge per sprint present in the project's steps, or "hors sprint" when it has none.
-function projectSprintBadges(group) {
-  const sprints = [...new Set(group.map((s) => s.sprint).filter((n) => n != null))].sort((a, b) => a - b);
-  return sprints.length ? sprints.map(sprintBadge) : [outOfSprintBadge()];
+// A project whose steps are all finished: closing date = latest done_date, effort = sum of estimates.
+function closedInfo(group) {
+  if (!group.length || !group.every((s) => s.status === 'Terminé')) return null;
+  const date = group.reduce((max, s) => ((s.done_date ?? '') > max ? s.done_date : max), '');
+  return { date, hours: Math.round(sum(group, (s) => s.load) / 60) };
+}
+
+function closedBadge(closed) {
+  if (!closed) return null;
+  return el('span', { class: 'badge closed' },
+    `terminé${closed.date ? ` le ${closed.date}` : ''} en ~${closed.hours} h estimées`);
 }
 
 function renderProjects(projects, steps) {
@@ -438,14 +440,18 @@ function renderProjects(projects, steps) {
   // pushes down its neighbour. The CSS "order" keeps the reading order on a single column.
   const columns = [el('div', { class: 'col' }), el('div', { class: 'col' })];
   const grid = el('div', { class: 'projects' }, ...columns);
-  projects.forEach((project, index) => {
-    const group = steps.filter((s) => s.project_id === project.id).sort((a, b) => a.step_order - b.step_order);
+  const groupOf = (project) => steps.filter((s) => s.project_id === project.id).sort((a, b) => a.step_order - b.step_order);
+  // Finished projects go last; the stable sort keeps the file order inside each group.
+  const ordered = projects.map((project) => ({ project, group: groupOf(project) }))
+    .sort((a, b) => Number(!!closedInfo(a.group)) - Number(!!closedInfo(b.group)));
+  ordered.forEach(({ project, group }, index) => {
+    const closed = closedInfo(group);
     const done = group.filter((s) => s.status === 'Terminé').length;
     const pct = group.length ? (done / group.length) * 100 : 0;
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
-        el('div', { class: 'project-head' }, el('h2', {}, project.name, ...projectSprintBadges(group)),
+        el('div', { class: 'project-head' }, el('h2', {}, project.name, closedBadge(closed)),
           el('span', {}, `${done} / ${group.length} terminées`)),
         el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
@@ -486,7 +492,7 @@ function render() {
   const sprintStats = computeStats(model.steps.filter((s) => inSprint(s, model.sprint)));
   const app = document.getElementById('app');
   app.replaceChildren(...[
-    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(sprintStats, model.sprint)),
+    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(sprintStats)),
     renderChart(model.history, model.sprint),
     renderToday(model.steps),
     renderProjects(model.projects, model.steps),
