@@ -152,15 +152,20 @@ function buildModel(global) {
 }
 
 // Percentages count the current sprint only. Out-of-sprint steps stay visible but are never counted.
-const inSprint = (step, sprint) => sprint > 0 && step.sprint === sprint;
+// A sub-task belongs to the sprint it carries (a finished one: the sprint it was done in), else its step's.
+const subSprint = (sub, step) => sub.sprint ?? step.sprint;
+// Sprints a step touches: its "sprints" list, else its own single sprint.
+const stepSprints = (step) => step.sprints ?? (step.sprint == null ? [] : [step.sprint]);
+const inSprint = (step, sprint) => sprint > 0 && stepSprints(step).includes(sprint);
 // History entries written before the sprint field existed belong to sprint 1.
 const entrySprint = (entry) => entry.sprint ?? 1;
 
-function computeStats(steps) {
+// With a sprint, only the sub-tasks of that sprint are counted (steps without sub-tasks count whole).
+function computeStats(steps, sprint) {
   const count = (status) => steps.filter((s) => s.status === status).length;
   const counted = steps.filter((s) => s.status !== 'Plus tard');
   const stepsDone = counted.filter((s) => s.status === 'Terminé').length;
-  const subs = counted.flatMap((s) => s.subtasks);
+  const subs = counted.flatMap((s) => s.subtasks.filter((sub) => sprint == null || subSprint(sub, s) === sprint));
   const subsDone = subs.filter((s) => s.status === 'Terminé');
   const totalMin = sum(subs, (s) => s.estimate_min);
   const doneMin = sum(subsDone, (s) => s.estimate_min);
@@ -397,14 +402,24 @@ function stepRows(step) {
 function renderMilestones(milestones, steps) {
   if (!milestones.length) return null;
   const listed = new Set(milestones.flatMap((m) => m.steps ?? []));
-  // Open milestones first, finished ones after (stable sort keeps the file order inside each group).
-  const isDone = (m) => m.status === 'Terminé';
-  const ordered = [...milestones].sort((a, b) => Number(isDone(a)) - Number(isDone(b)));
-  const rows = ordered.map((m) => {
+  // Resolve each milestone first: one whose steps are all Terminé is closed whatever its status field
+  // says, dated by the latest done_date of those steps. A milestone without steps is never auto-closed.
+  const resolved = milestones.map((m) => {
     const wanted = m.steps ?? [];
     const group = wanted.length
       ? steps.filter((s) => wanted.includes(s.num))
       : steps.filter((s) => !listed.has(s.num));
+    const allDone = wanted.length > 0 && group.length > 0 && group.every((s) => s.status === 'Terminé');
+    const doneDate = group.reduce((max, s) => ((s.done_date ?? '') > max ? s.done_date : max), '');
+    return {
+      m: allDone ? { ...m, status: 'Terminé', date: doneDate || m.date } : m,
+      group,
+    };
+  });
+  // Open milestones first, finished ones after (stable sort keeps the file order inside each group).
+  const isDone = (m) => m.status === 'Terminé';
+  const ordered = [...resolved].sort((a, b) => Number(isDone(a.m)) - Number(isDone(b.m)));
+  const rows = ordered.map(({ m, group }) => {
     const subs = group.flatMap((s) => s.subtasks);
     const done = subs.filter((s) => s.status === 'Terminé').length;
     const pct = subs.length ? (done / subs.length) * 100 : 0;
@@ -429,6 +444,13 @@ function closedInfo(group) {
   return { date, hours: Math.round(sum(group, (s) => s.load) / 60) };
 }
 
+// "Sprints 1, 2": union of the sprints of the project's steps, plain muted text (no badge).
+function sprintsLabel(group) {
+  const sprints = [...new Set(group.flatMap(stepSprints))].sort((a, b) => a - b);
+  if (!sprints.length) return null;
+  return el('span', { class: 'sprints' }, `${sprints.length > 1 ? 'Sprints' : 'Sprint'} ${sprints.join(', ')}`);
+}
+
 function closedBadge(closed) {
   if (!closed) return null;
   return el('span', { class: 'badge closed' },
@@ -451,7 +473,7 @@ function renderProjects(projects, steps) {
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
-        el('div', { class: 'project-head' }, el('h2', {}, project.name, closedBadge(closed)),
+        el('div', { class: 'project-head' }, el('h2', {}, project.name, sprintsLabel(group), closedBadge(closed)),
           el('span', {}, `${done} / ${group.length} terminées`)),
         el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
@@ -489,7 +511,7 @@ function renderDone(steps) {
 function render() {
   const model = buildModel(state.data.global);
   const stats = computeStats(model.steps);
-  const sprintStats = computeStats(model.steps.filter((s) => inSprint(s, model.sprint)));
+  const sprintStats = computeStats(model.steps.filter((s) => inSprint(s, model.sprint)), model.sprint);
   const app = document.getElementById('app');
   app.replaceChildren(...[
     el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(sprintStats)),

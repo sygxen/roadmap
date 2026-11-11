@@ -172,3 +172,5 @@ tr.subtasks li.finished { opacity: .5; }
 /* Finished milestones stay fully readable (the generic .finished fade does not apply to them). */
 tr.milestone-done td { font-weight: 500; }
 tr.milestone-done td.time:nth-child(3) { color: var(--green); }
+
+.sprints { margin-left: 10px; font-size: 12px; font-weight: 400; color: var(--muted); }
