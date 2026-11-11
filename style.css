@@ -131,7 +131,8 @@ details.project + details.project, .projects + details.project { margin-top: 16p
   .projects .col { display: flex; flex-direction: column; gap: 16px; flex: 1 1 0; min-width: 0; }
 }
 .projects .card { margin-bottom: 0; }
-.projects { margin-bottom: 16px; }
+/* Same 32px rhythm as between project cards (gap 16 + the margin-top rule above). */
+.projects { margin-bottom: 32px; }
 .project-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .project-head span { color: var(--muted); font-size: 13px; white-space: nowrap; }
 
