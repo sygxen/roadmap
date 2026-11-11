@@ -27,6 +27,8 @@ const state = {
   failingSince: {},  // file name -> Date of the first failure in the current streak
   openSteps: new Set(),
   openProjects: new Set(),
+  sprintOffset: 0,   // breadcrumb: how many sprints the window is shifted towards the past
+  chartSprint: null, // sprint shown in the chart (null = current sprint)
   retryTimer: null,
 };
 
@@ -144,28 +146,31 @@ function buildModel(global) {
     }
     return { ...step, subtasks, load };
   });
+  for (const step of steps) {
+    for (const sub of step.subtasks) {
+      if (sub.status === 'Terminé' && !sub.done_date) console.warn(`sub-task ${sub.n} is Terminé without done_date`);
+    }
+  }
   const projects = [...global.projects].sort((a, b) => a.order - b.order);
   const milestones = Array.isArray(global.milestones) ? global.milestones : [];
   // Current sprint = highest sprint number any step carries (steps outside any sprint have null).
-  const sprint = Math.max(0, ...steps.map((s) => s.sprint ?? 0));
+  const sprint = Math.max(0, ...steps.flatMap((s) => [s.sprint ?? 0, ...s.subtasks.map((sub) => sub.sprint ?? 0)]));
   return { info: global.info ?? {}, history: global.history ?? [], projects, steps, milestones, sprint };
 }
 
-// Percentages count the current sprint only. Out-of-sprint steps stay visible but are never counted.
 // A sub-task belongs to the sprint it carries (a finished one: the sprint it was done in), else its step's.
 const subSprint = (sub, step) => sub.sprint ?? step.sprint;
 // Sprints a step touches: its "sprints" list, else its own single sprint.
 const stepSprints = (step) => step.sprints ?? (step.sprint == null ? [] : [step.sprint]);
-const inSprint = (step, sprint) => sprint > 0 && stepSprints(step).includes(sprint);
+
 // History entries written before the sprint field existed belong to sprint 1.
 const entrySprint = (entry) => entry.sprint ?? 1;
 
-// With a sprint, only the sub-tasks of that sprint are counted (steps without sub-tasks count whole).
-function computeStats(steps, sprint) {
+function computeStats(steps) {
   const count = (status) => steps.filter((s) => s.status === status).length;
   const counted = steps.filter((s) => s.status !== 'Plus tard');
   const stepsDone = counted.filter((s) => s.status === 'Terminé').length;
-  const subs = counted.flatMap((s) => s.subtasks.filter((sub) => sprint == null || subSprint(sub, s) === sprint));
+  const subs = counted.flatMap((s) => s.subtasks);
   const subsDone = subs.filter((s) => s.status === 'Terminé');
   const totalMin = sum(subs, (s) => s.estimate_min);
   const doneMin = sum(subsDone, (s) => s.estimate_min);
@@ -234,6 +239,7 @@ function renderGlobal(stats) {
   return el('section', { class: 'card' },
     el('h2', { class: 'with-icon' }, el('img', { src: 'icon-progress.svg', alt: '', width: '28', height: '28' }),
       'Avancement global'),
+    el('p', { class: 'scope' }, 'Tous sprints confondus, hors « Plus tard »'),
     el('div', { class: 'metrics' },
       metric('En étapes terminées', `${formatNumber(stats.pctSteps, 1)} %`,
         `${stats.stepsDone} sur ${stats.stepsBase}`, stats.pctSteps),
@@ -244,17 +250,53 @@ function renderGlobal(stats) {
         stats.pctTime)));
 }
 
+// Sprint breadcrumb: the current sprint and the 3 before it, each with its sub-task percentage.
+// The left arrow slides the window 2 sprints into the past, the right arrow brings it back.
+// Clicking a sprint selects it for the chart.
+const WINDOW = 4;
+const SLIDE = 2;
+function renderBreadcrumb(steps, current) {
+  const counted = steps.filter((s) => s.status !== 'Plus tard');
+  const subsOf = (n) => counted.flatMap((s) => s.subtasks.filter((sub) => subSprint(sub, s) === n));
+  const sprints = [...new Set(steps.flatMap((s) => s.subtasks.map((sub) => subSprint(sub, s))).filter((n) => n != null))]
+    .sort((a, b) => a - b);
+  if (!sprints.length) return null;
+  state.sprintOffset = Math.min(state.sprintOffset, Math.max(0, sprints.length - WINDOW));
+  const end = sprints.length - state.sprintOffset;
+  const start = Math.max(0, end - WINDOW);
+  const selected = state.chartSprint ?? current;
+  const arrow = (label, text, delta) => el('button', {
+    class: 'crumb-arrow', type: 'button', 'data-shift': String(delta), title: label, 'aria-label': label,
+  }, text);
+  const items = sprints.slice(start, end).flatMap((n, index) => {
+    const subs = subsOf(n);
+    const pct = subs.length ? `${formatNumber((subs.filter((sub) => sub.status === 'Terminé').length / subs.length) * 100, 0)} %` : null;
+    return [
+      index ? el('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '›') : null,
+      el('button', {
+        class: 'crumb' + (n === selected ? ' selected' : ''), type: 'button', 'data-sprint': String(n),
+        'aria-pressed': String(n === selected),
+      }, `S${n}`, pct ? el('span', { class: 'crumb-pct' }, pct) : null),
+    ];
+  });
+  return el('nav', { class: 'card breadcrumb', 'aria-label': 'Sprints' },
+    start > 0 ? arrow('Sprints plus anciens', '‹', SLIDE) : null,
+    ...items,
+    state.sprintOffset > 0 ? arrow('Sprints plus récents', '›', -SLIDE) : null);
+}
+
 function renderChart(allHistory, sprint) {
-  // A sprint opened today has no history yet: draw the latest earlier sprint that has some.
-  const chartSprint = Math.max(0, ...allHistory.map(entrySprint).filter((n) => n <= sprint));
-  const history = allHistory.filter((h) => entrySprint(h) === chartSprint);
-  const card = el('section', { class: 'card chart' }, el('h2', {}, 'Progression jour par jour'));
+  const history = allHistory.filter((h) => entrySprint(h) === sprint);
+  const card = el('section', { class: 'card chart' }, el('h2', {}, `Progression jour par jour, sprint ${sprint}`));
   // Daily value: share of finished sub-tasks when the record has them, else the step percentage.
   const dailyValue = (h) => (h.sub_base ? (h.sub_done / h.sub_base) * 100 : h.pct);
   const points = history
     .map((h) => ({ x: dayOf(h.date), y: dailyValue(h), h }))
     .sort((a, b) => a.x - b.x);
-  if (points.length === 0) return card;
+  if (points.length === 0) {
+    card.append(el('p', { class: 'loading' }, 'Pas encore de point pour ce sprint.'));
+    return card;
+  }
 
   const fit = regress(points);
   const last = points[points.length - 1];
@@ -488,14 +530,23 @@ function renderProjects(projects, steps) {
 
 // "Fait" section: every finished sub-task, newest first. A missing done_date is shown as
 // "non datée" at the end of the list, without any error banner.
+// A finished sub-task without a date shows its step's closing date; its sprint sits next to it.
+function doneDateCell(sub, step) {
+  const date = sub.done_date ?? step.done_date;
+  const text = date ? ((sub.done_date_est || step.done_date_est) ? '≈ ' : '') + date : 'non datée';
+  const sprint = subSprint(sub, step);
+  return [text, sprint != null ? el('span', { class: 'sprint-tag' }, `S${sprint}`) : null];
+}
+
 function renderDone(steps) {
   const finished = steps.flatMap((step) => step.subtasks.filter((s) => s.status === 'Terminé').map((sub) => ({ sub, step })));
   const byNumberDesc = (a, b) => compareNumbers(b.sub.n, a.sub.n);
-  const dated = finished.filter((r) => r.sub.done_date)
-    .sort((a, b) => b.sub.done_date.localeCompare(a.sub.done_date) || byNumberDesc(a, b));
-  const undated = finished.filter((r) => !r.sub.done_date).sort(byNumberDesc);
+  const dateOf = (r) => r.sub.done_date ?? r.step.done_date;
+  const dated = finished.filter((r) => dateOf(r))
+    .sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || byNumberDesc(a, b));
+  const undated = finished.filter((r) => !dateOf(r)).sort(byNumberDesc);
   const rows = [...dated, ...undated].map(({ sub, step }) => el('tr', {},
-    el('td', { class: 'time' }, sub.done_date ? (step.done_date_est ? '≈ ' : '') + sub.done_date : 'non datée'),
+    el('td', { class: 'time' }, ...doneDateCell(sub, step)),
     el('td', { class: 'num' }, sub.n),
     el('td', {}, sub.label, el('div', { class: 'parent' }, parentLabel(step)))));
   const details = el('details', { class: 'card project', 'data-project': 'done-section' },
@@ -511,11 +562,11 @@ function renderDone(steps) {
 function render() {
   const model = buildModel(state.data.global);
   const stats = computeStats(model.steps);
-  const sprintStats = computeStats(model.steps.filter((s) => inSprint(s, model.sprint)), model.sprint);
   const app = document.getElementById('app');
   app.replaceChildren(...[
-    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(sprintStats)),
-    renderChart(model.history, model.sprint),
+    renderBreadcrumb(model.steps, model.sprint),
+    el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(stats)),
+    renderChart(model.history, state.chartSprint ?? model.sprint),
     renderToday(model.steps),
     renderProjects(model.projects, model.steps),
     renderMilestones(model.milestones, model.steps),
@@ -524,6 +575,13 @@ function render() {
 
 // Sub-task toggles: delegated, and the open set survives the periodic re-render.
 document.addEventListener('click', (event) => {
+  const crumb = event.target.closest('button.crumb, button.crumb-arrow');
+  if (crumb) {
+    if (crumb.dataset.sprint) state.chartSprint = Number(crumb.dataset.sprint);
+    else state.sprintOffset = Math.max(0, state.sprintOffset + Number(crumb.dataset.shift));
+    render();
+    return;
+  }
   const button = event.target.closest('button.toggle');
   if (!button) return;
   const id = button.dataset.id;

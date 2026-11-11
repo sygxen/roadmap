@@ -175,3 +175,15 @@ tr.milestone-done td { font-weight: 500; }
 tr.milestone-done td.time:nth-child(3) { color: var(--green); }
 
 .sprints { margin-left: 10px; font-size: 12px; font-weight: 400; color: var(--muted); }
+
+.scope { margin: -6px 0 10px; color: var(--muted); font-size: 12px; }
+.sprint-tag { margin-left: 6px; font-size: 11px; color: var(--muted); }
+
+.breadcrumb { display: flex; align-items: center; gap: 6px; padding: 8px 12px; }
+.breadcrumb button { font: inherit; cursor: pointer; color: var(--text); background: transparent;
+  border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; }
+.breadcrumb button.crumb { display: inline-flex; align-items: baseline; gap: 8px; font-weight: 600; }
+.breadcrumb button.crumb.selected { border-color: var(--accent); color: var(--accent); }
+.breadcrumb .crumb-pct { font-size: 12px; font-weight: 400; color: var(--muted); }
+.breadcrumb .crumb-arrow { color: var(--accent); font-size: 18px; line-height: 1; padding: 2px 10px; }
+.breadcrumb .crumb-sep { color: var(--muted); }
