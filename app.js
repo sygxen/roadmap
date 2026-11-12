@@ -162,10 +162,20 @@ function buildModel(global) {
 
 // Sprint dates written in plain text in info.sprint_rules:
 // "Sprint 1 : du 2026-10-22 au 2026-11-10. Sprint 2 : ouvert le 2026-11-11." -> { 1: {start, end}, 2: {start} }
+// A sprint with an impossible date, an end before its start or more than a year long is ignored,
+// so a typo never makes the daily loop run for centuries.
+const MAX_SPRINT_DAYS = 366;
 function parseSprintDates(text) {
   const dates = {};
   for (const match of String(text ?? '').matchAll(/Sprint (\d+)\s*:\s*(?:du|ouvert le) (\d{4}-\d{2}-\d{2})(?: au (\d{4}-\d{2}-\d{2}))?/g)) {
-    dates[Number(match[1])] = { start: match[2], end: match[3] ?? null };
+    const [, n, start, end = null] = match;
+    const valid = (iso) => Number.isFinite(dayOf(iso)) && isoOf(dayOf(iso)) === iso;
+    const span = dayOf(end ?? parisToday()) - dayOf(start);
+    if (!valid(start) || (end && (!valid(end) || end < start)) || span > MAX_SPRINT_DAYS) {
+      console.warn(`sprint ${n}: dates ${start}${end ? ' to ' + end : ''} ignored (invalid or longer than ${MAX_SPRINT_DAYS} days)`);
+      continue;
+    }
+    dates[Number(n)] = { start, end };
   }
   return dates;
 }
@@ -350,6 +360,10 @@ function renderChart(steps, sprint, sprintDates) {
   }
   const end = dates.end && dates.end < today ? dates.end : today;
   const points = sprintProgress(steps, sprint, dates.start, end);
+  if (points.length === 0) {
+    card.append(el('p', { class: 'loading' }, 'Dates du sprint invalides.'));
+    return card;
+  }
 
   const fit = regress(points);
   const last = points[points.length - 1];

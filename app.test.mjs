@@ -33,6 +33,14 @@ test('sprint dates are read from sprint_rules', () => {
   assert.deepEqual(plain(parseSprintDates(undefined)), {});
 });
 
+test('impossible, reversed or century-long sprint dates are ignored', () => {
+  warnings.length = 0;
+  const text = 'Sprint 1 : du 2026-00-15 au 2026-11-10. Sprint 2 : du 2026-11-10 au 2026-11-01. '
+    + 'Sprint 3 : ouvert le 0026-11-11. Sprint 4 : du 2026-02-30 au 2026-03-10. Sprint 5 : ouvert le 2026-11-11.';
+  assert.deepEqual(Object.keys(plain(parseSprintDates(text))), ['5']);
+  assert.equal(warnings.length, 4);
+});
+
 const sub = (n, status, extra = {}) => ({ n, status, estimate_min: 60, ...extra });
 const steps = [
   { id: 'a', status: 'En cours', sprint: 2, subtasks: [
