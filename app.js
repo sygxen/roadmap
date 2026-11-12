@@ -153,9 +153,31 @@ function buildModel(global) {
   }
   const projects = [...global.projects].sort((a, b) => a.order - b.order);
   const milestones = Array.isArray(global.milestones) ? global.milestones : [];
-  // Current sprint = highest sprint number any step carries (steps outside any sprint have null).
-  const sprint = Math.max(0, ...steps.flatMap((s) => [s.sprint ?? 0, ...s.subtasks.map((sub) => sub.sprint ?? 0)]));
-  return { info: global.info ?? {}, history: global.history ?? [], projects, steps, milestones, sprint };
+  const info = global.info ?? {};
+  // Current sprint = info.sprint ("Sprint 2"), else the highest sprint number any step carries.
+  const declared = Number(/(\d+)/.exec(info.sprint ?? '')?.[1]);
+  const sprint = declared || Math.max(0, ...steps.flatMap((s) => [s.sprint ?? 0, ...s.subtasks.map((sub) => sub.sprint ?? 0)]));
+  return { info, projects, steps, milestones, sprint, sprintDates: parseSprintDates(info.sprint_rules) };
+}
+
+// Sprint dates written in plain text in info.sprint_rules:
+// "Sprint 1 : du 2026-10-22 au 2026-11-10. Sprint 2 : ouvert le 2026-11-11." -> { 1: {start, end}, 2: {start} }
+// A sprint with an impossible date, an end before its start or more than a year long is ignored,
+// so a typo never makes the daily loop run for centuries.
+const MAX_SPRINT_DAYS = 366;
+function parseSprintDates(text) {
+  const dates = {};
+  for (const match of String(text ?? '').matchAll(/Sprint (\d+)\s*:\s*(?:du|ouvert le) (\d{4}-\d{2}-\d{2})(?: au (\d{4}-\d{2}-\d{2}))?/g)) {
+    const [, n, start, end = null] = match;
+    const valid = (iso) => Number.isFinite(dayOf(iso)) && isoOf(dayOf(iso)) === iso;
+    const span = dayOf(end ?? parisToday()) - dayOf(start);
+    if (!valid(start) || (end && (!valid(end) || end < start)) || span > MAX_SPRINT_DAYS) {
+      console.warn(`sprint ${n}: dates ${start}${end ? ' to ' + end : ''} ignored (invalid or longer than ${MAX_SPRINT_DAYS} days)`);
+      continue;
+    }
+    dates[Number(n)] = { start, end };
+  }
+  return dates;
 }
 
 // A sub-task belongs to the sprint it carries (a finished one: the sprint it was done in), else its step's.
@@ -163,8 +185,40 @@ const subSprint = (sub, step) => sub.sprint ?? step.sprint;
 // Sprints a step touches: its "sprints" list, else its own single sprint.
 const stepSprints = (step) => step.sprints ?? (step.sprint == null ? [] : [step.sprint]);
 
-// History entries written before the sprint field existed belong to sprint 1.
-const entrySprint = (entry) => entry.sprint ?? 1;
+// Sprint scope: its sub-tasks, minus those (or those of a step) set to "Plus tard".
+const sprintScope = (steps, n) => steps.flatMap((step) => step.subtasks
+  .filter((sub) => n > 0 && subSprint(sub, step) === n && sub.status !== 'Plus tard' && step.status !== 'Plus tard')
+  .map((sub) => ({ sub, step })));
+
+// Today's date in Paris, as YYYY-MM-DD (the en-CA locale formats dates that way).
+const parisToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date());
+
+// Daily progress of a sprint, computed from the sub-tasks (no stored history): one point per day from
+// `start` to `end`, with the current scope applied to every day. A finished sub-task counts from its
+// done_date, else its step's done_date; without either it is left out and reported in the console.
+function sprintProgress(steps, n, start, end) {
+  const scope = sprintScope(steps, n);
+  const finished = [];
+  for (const { sub, step } of scope) {
+    if (sub.status !== 'Terminé') continue;
+    const date = sub.done_date ?? step.done_date;
+    if (date) finished.push({ date, min: sub.estimate_min || 0 });
+    else console.warn(`sub-task ${sub.n} is Terminé without done_date, nor on its step: left out of the curve`);
+  }
+  const totalMin = sum(scope, (r) => r.sub.estimate_min);
+  const points = [];
+  for (let day = dayOf(start); day <= dayOf(end); day++) {
+    const date = isoOf(day);
+    const done = finished.filter((f) => f.date <= date);
+    const doneMin = sum(done, (f) => f.min);
+    points.push({
+      x: day, date, done: done.length, base: scope.length,
+      y: scope.length ? (done.length / scope.length) * 100 : 0,
+      pctTime: totalMin ? (doneMin / totalMin) * 100 : 0,
+    });
+  }
+  return points;
+}
 
 function computeStats(steps) {
   const count = (status) => steps.filter((s) => s.status === status).length;
@@ -244,7 +298,7 @@ function sprintBadge(n, text) {
 
 // Main card: progress of the current sprint, i.e. its sub-tasks (finished ones keep the sprint they were done in).
 function renderGlobal(steps, sprint) {
-  const subs = steps.flatMap((step) => step.subtasks.filter((sub) => sprint > 0 && subSprint(sub, step) === sprint));
+  const subs = sprintScope(steps, sprint).map((r) => r.sub);
   const done = subs.filter((sub) => sub.status === 'Terminé');
   const totalMin = sum(subs, (sub) => sub.estimate_min);
   const doneMin = sum(done, (sub) => sub.estimate_min);
@@ -267,8 +321,7 @@ function renderGlobal(steps, sprint) {
 const WINDOW = 4;
 const SLIDE = 2;
 function renderBreadcrumb(steps, current) {
-  const counted = steps.filter((s) => s.status !== 'Plus tard');
-  const subsOf = (n) => counted.flatMap((s) => s.subtasks.filter((sub) => subSprint(sub, s) === n));
+  const subsOf = (n) => sprintScope(steps, n).map((r) => r.sub);
   const sprints = [...new Set(steps.flatMap((s) => s.subtasks.map((sub) => subSprint(sub, s))).filter((n) => n != null))]
     .sort((a, b) => a - b);
   if (!sprints.length) return null;
@@ -296,16 +349,19 @@ function renderBreadcrumb(steps, current) {
     state.sprintOffset > 0 ? arrow('Sprints plus récents', '›', -SLIDE) : null);
 }
 
-function renderChart(allHistory, sprint) {
-  const history = allHistory.filter((h) => entrySprint(h) === sprint);
+// The curve is computed from the sub-tasks at each load: from the sprint's start to its end, or to today.
+function renderChart(steps, sprint, sprintDates) {
   const card = el('section', { class: 'card chart' }, el('h2', {}, `Progression jour par jour, sprint ${sprint}`));
-  // Daily value: share of finished sub-tasks when the record has them, else the step percentage.
-  const dailyValue = (h) => (h.sub_base ? (h.sub_done / h.sub_base) * 100 : h.pct);
-  const points = history
-    .map((h) => ({ x: dayOf(h.date), y: dailyValue(h), h }))
-    .sort((a, b) => a.x - b.x);
+  const dates = sprintDates[sprint];
+  const today = parisToday();
+  if (!dates || dates.start > today) {
+    card.append(el('p', { class: 'loading' }, dates ? 'Ce sprint n’a pas encore commencé.' : 'Date de début du sprint inconnue.'));
+    return card;
+  }
+  const end = dates.end && dates.end < today ? dates.end : today;
+  const points = sprintProgress(steps, sprint, dates.start, end);
   if (points.length === 0) {
-    card.append(el('p', { class: 'loading' }, 'Pas encore de point pour ce sprint.'));
+    card.append(el('p', { class: 'loading' }, 'Dates du sprint invalides.'));
     return card;
   }
 
@@ -352,8 +408,7 @@ function renderChart(allHistory, sprint) {
   const tooltip = document.getElementById('tooltip');
   for (const p of points) {
     const circle = add('circle', { class: 'pt', cx: sx(p.x), cy: sy(p.y), r: 5 });
-    const counts = p.h.sub_base ? `${p.h.sub_done} sur ${p.h.sub_base}` : `${p.h.done} sur ${p.h.base}`;
-    const text = `${p.h.date} : ${formatNumber(p.y, 1)} % (${counts})`;
+    const text = `${p.date} : ${formatNumber(p.y, 1)} % (${p.done} sur ${p.base}), ${formatNumber(p.pctTime, 1)} % en temps`;
     circle.addEventListener('mousemove', (event) => {
       tooltip.hidden = false;
       tooltip.textContent = text;
@@ -577,7 +632,7 @@ function render() {
   app.replaceChildren(...[
     renderBreadcrumb(model.steps, model.sprint),
     el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(model.steps, model.sprint)),
-    renderChart(model.history, state.chartSprint ?? model.sprint),
+    renderChart(model.steps, state.chartSprint ?? model.sprint, model.sprintDates),
     renderToday(model.steps),
     renderProjects(model.projects, model.steps),
     renderMilestones(model.milestones, model.steps),
