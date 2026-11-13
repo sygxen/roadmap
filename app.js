@@ -157,25 +157,41 @@ function buildModel(global) {
   // Current sprint = info.sprint ("Sprint 2"), else the highest sprint number any step carries.
   const declared = Number(/(\d+)/.exec(info.sprint ?? '')?.[1]);
   const sprint = declared || Math.max(0, ...steps.flatMap((s) => [s.sprint ?? 0, ...s.subtasks.map((sub) => sub.sprint ?? 0)]));
-  return { info, projects, steps, milestones, sprint, sprintDates: parseSprintDates(info.sprint_rules) };
+  return { info, projects, steps, milestones, sprint, sprintDates: readSprintDates(info) };
 }
 
-// Sprint dates written in plain text in info.sprint_rules:
-// "Sprint 1 : du 2026-10-22 au 2026-11-10. Sprint 2 : ouvert le 2026-11-11." -> { 1: {start, end}, 2: {start} }
+// Sprint dates: the info.sprints field ([{n, start, end}]) when present, else the plain text of info.sprint_rules.
+function readSprintDates(info) {
+  return Array.isArray(info.sprints) && info.sprints.length
+    ? sprintDatesFromList(info.sprints)
+    : parseSprintDates(info.sprint_rules);
+}
+
 // A sprint with an impossible date, an end before its start or more than a year long is ignored,
 // so a typo never makes the daily loop run for centuries.
 const MAX_SPRINT_DAYS = 366;
+function addSprintDates(dates, n, start, end) {
+  const valid = (iso) => typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso)
+    && Number.isFinite(dayOf(iso)) && isoOf(dayOf(iso)) === iso;
+  const ok = Number.isInteger(n) && n > 0 && valid(start) && (end == null || (valid(end) && end >= start))
+    && dayOf(end ?? parisToday()) - dayOf(start) <= MAX_SPRINT_DAYS;
+  if (ok) dates[n] = { start, end: end ?? null };
+  else console.warn(`sprint ${n}: dates ${start}${end ? ' to ' + end : ''} ignored (invalid or longer than ${MAX_SPRINT_DAYS} days)`);
+}
+
+// info.sprints: [{"n": 1, "start": "2026-10-22", "end": "2026-11-10"}, {"n": 2, "start": "2026-11-11", "end": null}]
+function sprintDatesFromList(list) {
+  const dates = {};
+  for (const entry of list) addSprintDates(dates, entry?.n, entry?.start, entry?.end);
+  return dates;
+}
+
+// Fallback, info.sprint_rules in plain text:
+// "Sprint 1 : du 2026-10-22 au 2026-11-10. Sprint 2 : ouvert le 2026-11-11." -> { 1: {start, end}, 2: {start} }
 function parseSprintDates(text) {
   const dates = {};
   for (const match of String(text ?? '').matchAll(/Sprint (\d+)\s*:\s*(?:du|ouvert le) (\d{4}-\d{2}-\d{2})(?: au (\d{4}-\d{2}-\d{2}))?/g)) {
-    const [, n, start, end = null] = match;
-    const valid = (iso) => Number.isFinite(dayOf(iso)) && isoOf(dayOf(iso)) === iso;
-    const span = dayOf(end ?? parisToday()) - dayOf(start);
-    if (!valid(start) || (end && (!valid(end) || end < start)) || span > MAX_SPRINT_DAYS) {
-      console.warn(`sprint ${n}: dates ${start}${end ? ' to ' + end : ''} ignored (invalid or longer than ${MAX_SPRINT_DAYS} days)`);
-      continue;
-    }
-    dates[Number(n)] = { start, end };
+    addSprintDates(dates, Number(match[1]), match[2], match[3]);
   }
   return dates;
 }

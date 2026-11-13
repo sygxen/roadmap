@@ -19,7 +19,7 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(readFileSync(new URL('./app.js', import.meta.url), 'utf8'), context);
-const { parseSprintDates, sprintProgress } = context;
+const { parseSprintDates, readSprintDates, sprintProgress } = context;
 // Objects built inside the vm context have that context's prototypes: compare plain JSON copies.
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
@@ -39,6 +39,31 @@ test('impossible, reversed or century-long sprint dates are ignored', () => {
     + 'Sprint 3 : ouvert le 0026-11-11. Sprint 4 : du 2026-02-30 au 2026-03-10. Sprint 5 : ouvert le 2026-11-11.';
   assert.deepEqual(Object.keys(plain(parseSprintDates(text))), ['5']);
   assert.equal(warnings.length, 4);
+});
+
+test('info.sprints is read first, sprint_rules is the fallback', () => {
+  const sprints = [{ n: 1, start: '2026-10-22', end: '2026-11-10' }, { n: 2, start: '2026-11-12', end: null }];
+  assert.deepEqual(plain(readSprintDates({ sprints, sprint_rules: RULES })), {
+    1: { start: '2026-10-22', end: '2026-11-10' },
+    2: { start: '2026-11-12', end: null },
+  });
+  assert.deepEqual(plain(readSprintDates({ sprints: [], sprint_rules: RULES }))[2], { start: '2026-11-11', end: null });
+  assert.deepEqual(plain(readSprintDates({ sprint_rules: RULES }))[2], { start: '2026-11-11', end: null });
+});
+
+test('info.sprints entries with bad dates or numbers are ignored', () => {
+  warnings.length = 0;
+  const sprints = [
+    { n: 1, start: '2026-02-30', end: '2026-03-10' },  // impossible date
+    { n: 2, start: '2026-11-10', end: '2026-11-01' },  // reversed
+    { n: 3, start: '0026-11-11', end: null },          // centuries long
+    { n: '4', start: '2026-11-11', end: null },        // number as text
+    { n: 5, start: 20261111, end: null },              // date as number
+    null,
+    { n: 6, start: '2026-11-11' },                     // no end: open sprint, kept
+  ];
+  assert.deepEqual(plain(readSprintDates({ sprints })), { 6: { start: '2026-11-11', end: null } });
+  assert.equal(warnings.length, 6);
 });
 
 const sub = (n, status, extra = {}) => ({ n, status, estimate_min: 60, ...extra });
