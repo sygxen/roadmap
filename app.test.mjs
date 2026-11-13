@@ -61,9 +61,11 @@ test('info.sprints entries with bad dates or numbers are ignored', () => {
     { n: 5, start: 20261111, end: null },              // date as number
     null,
     { n: 6, start: '2026-11-11' },                     // no end: open sprint, kept
+    // Objects that throw when turned into text: the warning must not crash the render.
+    JSON.parse('{"n": {"toString": 1}, "start": {"toString": 1}, "end": [{"toString": 1}]}'),
   ];
   assert.deepEqual(plain(readSprintDates({ sprints })), { 6: { start: '2026-11-11', end: null } });
-  assert.equal(warnings.length, 6);
+  assert.equal(warnings.length, 7);
 });
 
 const sub = (n, status, extra = {}) => ({ n, status, estimate_min: 60, ...extra });

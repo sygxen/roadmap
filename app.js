@@ -176,7 +176,8 @@ function addSprintDates(dates, n, start, end) {
   const ok = Number.isInteger(n) && n > 0 && valid(start) && (end == null || (valid(end) && end >= start))
     && dayOf(end ?? parisToday()) - dayOf(start) <= MAX_SPRINT_DAYS;
   if (ok) dates[n] = { start, end: end ?? null };
-  else console.warn(`sprint ${n}: dates ${start}${end ? ' to ' + end : ''} ignored (invalid or longer than ${MAX_SPRINT_DAYS} days)`);
+  // The raw values go as separate arguments: interpolating them could throw on a malformed object.
+  else console.warn(`sprint dates ignored (invalid or longer than ${MAX_SPRINT_DAYS} days):`, { n, start, end });
 }
 
 // info.sprints: [{"n": 1, "start": "2026-10-22", "end": "2026-11-10"}, {"n": 2, "start": "2026-11-11", "end": null}]
