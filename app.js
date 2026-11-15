@@ -141,7 +141,9 @@ function buildModel(global) {
   const steps = global.steps.map((step) => {
     const subtasks = step.subtasks ?? [];
     const load = subtasks.length ? sum(subtasks, (s) => s.estimate_min) : (step.estimate_min || 0);
-    if (subtasks.length && step.estimate_min !== load) {
+    // A step without estimate whose sub-tasks have none either is a dev-team ticket tracked in JIRA: no warning.
+    const timed = subtasks.some((s) => s.estimate_min != null);
+    if (subtasks.length && step.estimate_min !== load && (step.estimate_min != null || timed)) {
       console.warn(`step ${step.id}: estimate_min ${step.estimate_min} differs from sub-task sum ${load}`);
     }
     return { ...step, subtasks, load };

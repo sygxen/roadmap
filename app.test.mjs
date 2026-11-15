@@ -109,3 +109,18 @@ test('steps sort by status (En cours first, Terminé last), then by number', () 
   ];
   assert.deepEqual(plain(list.sort(context.compareSteps).map((s) => s.num)), [8, 1, 3, 2, 6, 5, 7, 9, 4]);
 });
+
+test('estimate warning: silent for untimed JIRA steps, kept when a sub-task has a time or the sums differ', () => {
+  warnings.length = 0;
+  const step = (id, estimate_min, ...times) => ({
+    id, num: 1, status: 'À faire', project_id: 'p', estimate_min,
+    subtasks: times.map((t, i) => ({ n: `${id}.${i}`, status: 'À faire', estimate_min: t })),
+  });
+  context.buildModel({ info: {}, projects: [], steps: [
+    step('jira', null, null, null),  // no time anywhere: silent
+    step('null-timed', null, 30, null), // step without estimate, sub-task with one: warned
+    step('differs', 60, 30, 45),     // sums differ: warned
+    step('ok', 75, 30, 45),          // match: silent
+  ] });
+  assert.deepEqual(plain(warnings.map((w) => w.split(':')[0])), ['step null-timed', 'step differs']);
+});
