@@ -211,3 +211,6 @@ tr.milestone-done td.time:nth-child(3) { color: var(--green); }
 button.closed-toggle { font: inherit; font-size: 14px; cursor: pointer; color: var(--muted); background: transparent;
   border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; margin: 0 0 16px; }
 button.closed-toggle:hover { color: var(--text); }
+
+/* One-line summary of the day's list, next to its title. */
+.today-summary { margin-left: 12px; color: var(--muted); font-size: 14px; font-weight: 400; }
