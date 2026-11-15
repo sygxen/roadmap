@@ -141,3 +141,14 @@ test('finished projects are split from open ones, in file order', () => {
   assert.equal(context.closedToggleLabel(false), 'Afficher les projets terminés');
   assert.equal(context.closedToggleLabel(true), 'Masquer les projets terminés');
 });
+
+test('today list summary: counts by status, then remaining hours of unfinished tasks', () => {
+  const t = (status, estimate_min) => ({ status, estimate_min });
+  assert.equal(context.todaySummary([
+    t('Terminé', 60), t('Terminé', 30), t('Terminé', 15), t('En cours', 90), t('À faire', 60), t('À faire', null),
+    t('En cours', 75),
+  ]), '3 terminées · 2 en cours · 2 à faire · 3 h 45 restantes');
+  assert.equal(context.todaySummary([t('Bloqué', 20), t('Terminé', 10), t('À faire', 600)]),
+    '1 terminée · 0 en cours · 1 à faire · 1 bloquée · 10 h 20 restantes');
+  assert.equal(context.todaySummary([]), '');
+});

@@ -452,6 +452,24 @@ function renderChart(steps, sprint, sprintDates) {
 // Parent step shown in small text under a sub-task label.
 const parentLabel = (step) => `étape ${step.num} · ${step.step}`;
 
+// One-line summary next to the list title (decision of 2026-11-15), e.g.
+// "3 terminées · 8 en cours · 9 à faire · 26 h 15 restantes". Blocked tasks appear only when there are some;
+// the remaining hours sum the estimates of every unfinished task.
+function todaySummary(tasks) {
+  if (!tasks.length) return '';
+  const count = (status) => tasks.filter((t) => t.status === status).length;
+  const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
+  const blocked = count('Bloqué');
+  const left = Math.round(sum(tasks.filter((t) => t.status !== 'Terminé'), (t) => t.estimate_min));
+  return [
+    plural(count('Terminé'), 'terminée'),
+    `${count('En cours')} en cours`,
+    `${count('À faire')} à faire`,
+    blocked ? plural(blocked, 'bloquée') : null,
+    `${Math.floor(left / 60)} h ${pad(left % 60)} restantes`,
+  ].filter(Boolean).join(' · ');
+}
+
 // "Liste du ...": the latest list present in the file (greatest today_date), finished sub-tasks
 // included, in `today` order. It never disappears when the date changes: only the file's author
 // starts a new list. The `today` number is shown as is, never renumbered.
@@ -484,7 +502,8 @@ function renderToday(steps) {
         isStep ? null : el('div', { class: 'parent' }, parentLabel(step))),
       el('td', {}, sub.owner)))));
   return el('section', { class: 'card' },
-    el('h2', {}, listDate ? `Liste du ${listDate}` : 'Liste du jour'),
+    el('h2', {}, listDate ? `Liste du ${listDate}` : 'Liste du jour',
+      rows.length ? el('span', { class: 'today-summary' }, todaySummary(rows.map((r) => r.sub))) : null),
     rows.length ? table : el('p', { class: 'loading' }, 'Aucune liste du jour pour l’instant.'),
     el('p', { class: 'total' }, `Temps total : ${formatMinutes(totalMin)}`));
 }
