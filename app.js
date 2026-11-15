@@ -582,12 +582,20 @@ function closedBadge(closed) {
     `terminé${closed.date ? ` le ${closed.date}` : ''} en ~${closed.hours} h estimées`);
 }
 
+// Steps of a project: by status in this order, then by number (decision of 2026-11-15).
+// An unknown status goes after every known one.
+const STATUS_ORDER = ['En cours', 'À faire', 'Bloqué', 'En pause', 'À renseigner', 'Plus tard', 'Terminé'];
+function compareSteps(a, b) {
+  const rank = (step) => (STATUS_ORDER.includes(step.status) ? STATUS_ORDER.indexOf(step.status) : STATUS_ORDER.length);
+  return rank(a) - rank(b) || a.num - b.num;
+}
+
 function renderProjects(projects, steps) {
   // Two independent columns (projects alternate between them), so an open accordion never
   // pushes down its neighbour. The CSS "order" keeps the reading order on a single column.
   const columns = [el('div', { class: 'col' }), el('div', { class: 'col' })];
   const grid = el('div', { class: 'projects' }, ...columns);
-  const groupOf = (project) => steps.filter((s) => s.project_id === project.id).sort((a, b) => a.step_order - b.step_order);
+  const groupOf = (project) => steps.filter((s) => s.project_id === project.id).sort(compareSteps);
   // Finished projects go last; the stable sort keeps the file order inside each group.
   const ordered = projects.map((project) => ({ project, group: groupOf(project) }))
     .sort((a, b) => Number(!!closedInfo(a.group)) - Number(!!closedInfo(b.group)));

@@ -100,3 +100,12 @@ test('one point per day, plateaus included, current scope on every day', () => {
   assert.match(warnings[0], /3\.1/);
 });
 
+
+test('steps sort by status (En cours first, Terminé last), then by number', () => {
+  const list = [
+    { num: 9, status: 'Terminé' }, { num: 3, status: 'À faire' }, { num: 7, status: 'Plus tard' },
+    { num: 2, status: 'Bloqué' }, { num: 8, status: 'En cours' }, { num: 1, status: 'À faire' },
+    { num: 4, status: 'Inconnu' }, { num: 5, status: 'À renseigner' }, { num: 6, status: 'En pause' },
+  ];
+  assert.deepEqual(plain(list.sort(context.compareSteps).map((s) => s.num)), [8, 1, 3, 2, 6, 5, 7, 9, 4]);
+});
