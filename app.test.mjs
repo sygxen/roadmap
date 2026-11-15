@@ -124,3 +124,20 @@ test('estimate warning: silent for untimed JIRA steps, kept when a sub-task has 
   ] });
   assert.deepEqual(plain(warnings.map((w) => w.split(':')[0])), ['step null-timed', 'step differs']);
 });
+
+test('milestones show their id before their name', () => {
+  assert.equal(context.milestoneLabel({ id: 'M3', name: 'TLS 1.0 tranché' }), 'M3 · TLS 1.0 tranché');
+  assert.equal(context.milestoneLabel({ name: 'Sans id' }), 'Sans id');
+  assert.equal(context.milestoneLabel({ id: 'M7' }), 'M7');
+});
+
+test('finished projects are split from open ones, in file order', () => {
+  const projects = [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }, { id: 'empty' }];
+  const s = (project_id, status) => ({ project_id, status, num: 1, load: 0 });
+  const { open, closed } = context.splitProjects(projects,
+    [s('p1', 'Terminé'), s('p2', 'Terminé'), s('p2', 'En cours'), s('p3', 'Terminé')]);
+  assert.deepEqual(plain(open.map((o) => o.project.id)), ['p2', 'empty']);
+  assert.deepEqual(plain(closed.map((o) => o.project.id)), ['p1', 'p3']);
+  assert.equal(context.closedToggleLabel(false), 'Afficher les projets terminés');
+  assert.equal(context.closedToggleLabel(true), 'Masquer les projets terminés');
+});
