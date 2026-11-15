@@ -29,6 +29,7 @@ const state = {
   openProjects: new Set(),
   sprintOffset: 0,   // breadcrumb: how many sprints the window is shifted towards the past
   chartSprint: null, // sprint shown in the chart (null = current sprint)
+  showClosed: false,  // finished projects are hidden until the button shows them (kept for the visit)
   retryTimer: null,
 };
 
@@ -524,6 +525,11 @@ function stepRows(step) {
   return rows;
 }
 
+// "M3 · TLS 1.0 tranché": the milestone id before its name (decision of 2026-11-15).
+function milestoneLabel(m) {
+  return [m.id, m.name].filter((part) => part != null && part !== '').join(' · ');
+}
+
 // Milestones: one row each, in file order. An empty "steps" list means "every step no other
 // milestone lists". The percentage is finished sub-tasks over all sub-tasks of those steps.
 function renderMilestones(milestones, steps) {
@@ -551,7 +557,7 @@ function renderMilestones(milestones, steps) {
     const done = subs.filter((s) => s.status === 'Terminé').length;
     const pct = subs.length ? (done / subs.length) * 100 : 0;
     return el('tr', { class: isDone(m) ? 'milestone-done' : '' },
-      el('td', {}, m.name),
+      el('td', {}, milestoneLabel(m)),
       el('td', {}, statusCell(m.status)),
       el('td', { class: 'time' }, isDone(m) && m.date ? `terminé le ${m.date}` : (m.date || '')),
       el('td', { class: 'time' }, subs.length ? `${formatNumber(pct, 0)} %` : '—'),
@@ -592,16 +598,22 @@ function compareSteps(a, b) {
   return rank(a) - rank(b) || a.num - b.num;
 }
 
-function renderProjects(projects, steps) {
+// Open projects and finished ones (every step Terminé), each in file order.
+function splitProjects(projects, steps) {
+  const groupOf = (project) => steps.filter((s) => s.project_id === project.id).sort(compareSteps);
+  const all = projects.map((project) => ({ project, group: groupOf(project) }));
+  return { open: all.filter((p) => !closedInfo(p.group)), closed: all.filter((p) => closedInfo(p.group)) };
+}
+
+function closedToggleLabel(shown) {
+  return `${shown ? 'Masquer' : 'Afficher'} les projets terminés`;
+}
+
+function projectGrid(list) {
   // Two independent columns (projects alternate between them), so an open accordion never
   // pushes down its neighbour. The CSS "order" keeps the reading order on a single column.
   const columns = [el('div', { class: 'col' }), el('div', { class: 'col' })];
-  const grid = el('div', { class: 'projects' }, ...columns);
-  const groupOf = (project) => steps.filter((s) => s.project_id === project.id).sort(compareSteps);
-  // Finished projects go last; the stable sort keeps the file order inside each group.
-  const ordered = projects.map((project) => ({ project, group: groupOf(project) }))
-    .sort((a, b) => Number(!!closedInfo(a.group)) - Number(!!closedInfo(b.group)));
-  ordered.forEach(({ project, group }, index) => {
+  list.forEach(({ project, group }, index) => {
     const closed = closedInfo(group);
     const done = group.filter((s) => s.status === 'Terminé').length;
     const pct = group.length ? (done / group.length) * 100 : 0;
@@ -618,7 +630,16 @@ function renderProjects(projects, steps) {
     accordion.style.order = index;
     columns[index % 2].append(accordion);
   });
-  return grid;
+  return el('div', { class: 'projects' }, ...columns);
+}
+
+// Open projects, then a grey button that shows or hides the finished ones (hidden by default).
+function renderProjects(projects, steps) {
+  const { open, closed } = splitProjects(projects, steps);
+  if (!closed.length) return [projectGrid(open)];
+  const toggle = el('button', { class: 'closed-toggle', type: 'button', 'aria-expanded': String(state.showClosed) },
+    closedToggleLabel(state.showClosed));
+  return [projectGrid(open), toggle, state.showClosed ? projectGrid(closed) : null];
 }
 
 // "Fait" section: every finished sub-task, newest first. A missing done_date is shown as
@@ -661,7 +682,7 @@ function render() {
     el('div', { class: 'top-row' }, renderHeader(stats, model.info), renderGlobal(model.steps, model.sprint)),
     renderChart(model.steps, state.chartSprint ?? model.sprint, model.sprintDates),
     renderToday(model.steps),
-    renderProjects(model.projects, model.steps),
+    ...renderProjects(model.projects, model.steps),
     renderMilestones(model.milestones, model.steps),
     renderDone(model.steps)].filter(Boolean));
 }
@@ -672,6 +693,11 @@ document.addEventListener('click', (event) => {
   if (crumb) {
     if (crumb.dataset.sprint) state.chartSprint = Number(crumb.dataset.sprint);
     else state.sprintOffset = Math.max(0, state.sprintOffset + Number(crumb.dataset.shift));
+    render();
+    return;
+  }
+  if (event.target.closest('button.closed-toggle')) {
+    state.showClosed = !state.showClosed;
     render();
     return;
   }
