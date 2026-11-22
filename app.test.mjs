@@ -152,3 +152,41 @@ test('today list summary: counts by status, then remaining hours of unfinished t
     '1 terminée · 0 en cours · 1 à faire · 1 bloquée · 10 h 20 restantes');
   assert.equal(context.todaySummary([]), '');
 });
+
+test('done files: names come from info.done_files, invalid months are skipped', () => {
+  warnings.length = 0;
+  assert.deepEqual(plain(context.doneFileNames({ done_files: [
+    { month: '2026-10', count: 2 }, { month: '2026-13', count: 1 }, { month: '../x', count: 1 },
+    { month: '2026-11', count: 3 }, { month: '2026-10', count: 2 },
+  ] })), ['done_2026_10', 'done_2026_11']);
+  assert.equal(warnings.length, 2);
+  assert.deepEqual(plain(context.doneFileNames({})), []);
+  assert.deepEqual(plain(context.doneFileNames(undefined)), []);
+});
+
+test('done files: steps are appended to global.json, which wins on a duplicate id', () => {
+  warnings.length = 0;
+  const global = { info: { done_files: [{ month: '2026-10', count: 2 }, { month: '2026-11', count: 1 }] },
+    projects: [], steps: [{ id: 'a', status: 'En cours' }] };
+  const files = {
+    done_2026_10: { month: '2026-10', steps: [{ id: 'a', status: 'Terminé' }, { id: 'b', status: 'Terminé' }] },
+    done_2026_11: { month: '2026-11', steps: [{ id: 'c', status: 'Terminé' }] },
+  };
+  const merged = context.mergeDone(global, files);
+  assert.deepEqual(plain(merged.steps), [
+    { id: 'a', status: 'En cours' }, { id: 'b', status: 'Terminé' }, { id: 'c', status: 'Terminé' }]);
+  assert.equal(global.steps.length, 1, 'global.json data is not modified');
+  assert.equal(warnings.length, 0);
+});
+
+test('done files: a missing file or a count mismatch keeps what is there and warns', () => {
+  warnings.length = 0;
+  const global = { info: { done_files: [{ month: '2026-10', count: 3 }, { month: '2026-11', count: 1 }] },
+    projects: [], steps: [] };
+  const merged = context.mergeDone(global, { done_2026_10: { month: '2026-10', steps: [{ id: 'b' }] } });
+  assert.deepEqual(plain(merged.steps), [{ id: 'b' }]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /done_2026_10: 1 steps, done_files says 3/);
+  const without = { info: {}, projects: [], steps: [{ id: 'x' }] };
+  assert.deepEqual(plain(context.mergeDone(without, {}).steps), [{ id: 'x' }]);
+});

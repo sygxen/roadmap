@@ -1,6 +1,7 @@
 'use strict';
 
-// Road map page: reads global.json (format 2, sprint field since version 109), written by another assistant, and renders it.
+// Road map page: reads global.json (format 2, sprint field since version 109) and the done_YYYY_MM.json files
+// it lists in info.done_files, all written by another assistant, and renders them.
 // Static page, no framework. All data is inserted with textContent (never innerHTML).
 
 const REFRESH_MS = 30000;
@@ -92,21 +93,59 @@ const isoOf = (day) => new Date(day * DAY_MS).toISOString().slice(0, 10);
 
 // ---------- loading ----------
 
+// global.json must have steps and projects; a done_YYYY_MM.json file has only steps.
 async function loadFile(name) {
   const response = await fetch(`${DATA_DIR}/${name}.json?t=${Date.now()}`, { cache: 'no-store' });
   if (!response.ok) throw new Error('HTTP ' + response.status);
   const parsed = JSON.parse(await response.text());
-  if (!parsed || !Array.isArray(parsed.steps) || !Array.isArray(parsed.projects)) {
+  if (!parsed || !Array.isArray(parsed.steps) || (name === 'global' && !Array.isArray(parsed.projects))) {
     throw new Error('unexpected structure');
   }
   return parsed;
 }
 
-async function refresh() {
-  const results = await Promise.allSettled(FILES.map(loadFile));
+// Finished steps live in done_YYYY_MM.json files listed by info.done_files (#C-1010): [{ month, count }].
+// The month becomes part of a URL, so only a real YYYY-MM month is accepted.
+const doneFileName = (month) =>
+  (typeof month === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(month) ? 'done_' + month.replace('-', '_') : null);
+
+function doneFileNames(info) {
+  const names = [];
+  for (const entry of info?.done_files ?? []) {
+    const name = doneFileName(entry?.month);
+    if (!name) console.warn(`done_files: invalid month ${JSON.stringify(entry?.month)} skipped`);
+    else if (!names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+// global.json plus the steps of its done files. While C writes, a step can briefly be in both
+// (done file written first): the global.json copy wins. A file not loaded yet is simply missing.
+function mergeDone(global, files) {
+  const seen = new Set(global.steps.map((step) => step.id));
+  const steps = [...global.steps];
+  for (const entry of global.info?.done_files ?? []) {
+    const name = doneFileName(entry?.month);
+    const file = name && files[name];
+    if (!file) continue;
+    if (Number.isInteger(entry.count) && file.steps.length !== entry.count) {
+      console.warn(`${name}: ${file.steps.length} steps, done_files says ${entry.count}`);
+    }
+    for (const step of file.steps) {
+      if (seen.has(step.id)) continue;
+      seen.add(step.id);
+      steps.push(step);
+    }
+  }
+  return { ...global, steps };
+}
+
+// Loads files and records each one's last valid version; returns true if one changed.
+async function loadAll(names) {
+  const results = await Promise.allSettled(names.map(loadFile));
   let changed = false;
   results.forEach((result, index) => {
-    const name = FILES[index];
+    const name = names[index];
     if (result.status === 'fulfilled') {
       delete state.failingSince[name];
       const text = JSON.stringify(result.value);
@@ -119,6 +158,24 @@ async function refresh() {
       state.failingSince[name] = new Date();
     }
   });
+  return changed;
+}
+
+async function refresh() {
+  let changed = await loadAll(FILES);
+  if (state.data.global) {
+    const names = doneFileNames(state.data.global.info);
+    // A month no longer listed is forgotten, with its error if it had one.
+    for (const name of Object.keys(state.data).concat(Object.keys(state.failingSince))) {
+      if (name.startsWith('done_') && !names.includes(name)) {
+        changed ||= name in state.data;
+        delete state.data[name];
+        delete state.signature[name];
+        delete state.failingSince[name];
+      }
+    }
+    if (await loadAll(names)) changed = true;
+  }
   showBanner();
   // A file caught mid-write by its author is usually fine a moment later: retry soon, not in 30 s.
   if (Object.keys(state.failingSince).length && !state.retryTimer) {
@@ -693,7 +750,7 @@ function renderDone(steps) {
 }
 
 function render() {
-  const model = buildModel(state.data.global);
+  const model = buildModel(mergeDone(state.data.global, state.data));
   const stats = computeStats(model.steps);
   const app = document.getElementById('app');
   app.replaceChildren(...[
