@@ -527,8 +527,14 @@ function todaySummary(tasks) {
   ].filter(Boolean).join(' · ');
 }
 
+// Today list order (Yoni, #C-1014): tasks in progress at the top, finished ones at the bottom,
+// the same status order as a project's steps; then by `today` number.
+function compareTodayRows(a, b) {
+  return statusRank(a.sub.status) - statusRank(b.sub.status) || a.sub.today - b.sub.today;
+}
+
 // "Liste du ...": the latest list present in the file (greatest today_date), finished sub-tasks
-// included, in `today` order. It never disappears when the date changes: only the file's author
+// included, by status then `today` order. It never disappears when the date changes: only the file's author
 // starts a new list. The `today` number is shown as is, never renumbered.
 function renderToday(steps) {
   // A task is a sub-task, or a whole step that carries today / today_date itself (a step without
@@ -547,7 +553,7 @@ function renderToday(steps) {
   const listDate = dated.reduce((max, r) => (r.sub.today_date > max ? r.sub.today_date : max), '');
   const rows = dated
     .filter((r) => r.sub.today_date === listDate)
-    .sort((a, b) => a.sub.today - b.sub.today);
+    .sort(compareTodayRows);
   const totalMin = sum(rows, (r) => r.sub.estimate_min);
   const table = el('table', {},
     el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Tâche', 'Qui'].map((t) => el('th', {}, t)))),
@@ -660,6 +666,24 @@ function sprintsLabel(group) {
   return el('span', { class: 'sprints' }, `${sprints.length > 1 ? 'Sprints' : 'Sprint'} ${sprints.join(', ')}`);
 }
 
+// Finished project (Yoni, #C-1014): only its first and last sprint, as sprint badges with an arrow;
+// a single badge when it started and ended in the same sprint.
+function sprintRange(group) {
+  const sprints = group.flatMap(stepSprints).filter((n) => n != null);
+  if (!sprints.length) return [];
+  const first = Math.min(...sprints);
+  const last = Math.max(...sprints);
+  return first === last ? [first] : [first, last];
+}
+
+function sprintRangeLabel(group) {
+  const range = sprintRange(group);
+  if (!range.length) return null;
+  return el('span', { class: 'sprint-range' }, sprintBadge(range[0]),
+    range.length > 1 ? el('span', { class: 'sprint-arrow', 'aria-label': 'à' }, '→') : null,
+    range.length > 1 ? sprintBadge(range[1]) : null);
+}
+
 function closedBadge(closed) {
   if (!closed) return null;
   return el('span', { class: 'badge closed' },
@@ -669,9 +693,11 @@ function closedBadge(closed) {
 // Steps of a project: by status in this order, then by number (decision of 2026-11-15).
 // An unknown status goes after every known one.
 const STATUS_ORDER = ['En cours', 'À faire', 'Bloqué', 'En pause', 'À renseigner', 'Plus tard', 'Terminé'];
+function statusRank(status) {
+  return STATUS_ORDER.includes(status) ? STATUS_ORDER.indexOf(status) : STATUS_ORDER.length;
+}
 function compareSteps(a, b) {
-  const rank = (step) => (STATUS_ORDER.includes(step.status) ? STATUS_ORDER.indexOf(step.status) : STATUS_ORDER.length);
-  return rank(a) - rank(b) || a.num - b.num;
+  return statusRank(a.status) - statusRank(b.status) || a.num - b.num;
 }
 
 // Open projects and finished ones (every step Terminé), each in file order.
@@ -696,7 +722,7 @@ function projectGrid(list) {
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
-        el('div', { class: 'project-head' }, el('h2', {}, project.name, sprintsLabel(group), closedBadge(closed)),
+        el('div', { class: 'project-head' }, el('h2', {}, project.name, closed ? sprintRangeLabel(group) : sprintsLabel(group), closedBadge(closed)),
           el('span', {}, `${done} / ${group.length} terminées`)),
         el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
@@ -728,25 +754,47 @@ function doneDateCell(sub, step) {
   return [text, sprintBadge(sprint, sprint != null ? `S${sprint}` : null)];
 }
 
-function renderDone(steps) {
-  const finished = steps.flatMap((step) => step.subtasks.filter((s) => s.status === 'Terminé').map((sub) => ({ sub, step })));
+// Finished sub-tasks by month of their done date (Yoni, #C-1014): newest month first, newest
+// sub-task first inside a month, undated ones in a last group (month null).
+function groupDoneByMonth(finished) {
   const byNumberDesc = (a, b) => compareNumbers(b.sub.n, a.sub.n);
   const dateOf = (r) => r.sub.done_date ?? r.step.done_date;
-  const dated = finished.filter((r) => dateOf(r))
-    .sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || byNumberDesc(a, b));
-  const undated = finished.filter((r) => !dateOf(r)).sort(byNumberDesc);
-  const rows = [...dated, ...undated].map(({ sub, step }) => el('tr', {},
-    el('td', { class: 'time' }, ...doneDateCell(sub, step)),
-    el('td', { class: 'num' }, sub.n),
-    el('td', {}, sub.label, el('div', { class: 'parent' }, parentLabel(step)))));
-  const details = el('details', { class: 'card project', 'data-project': 'done-section' },
-    el('summary', {},
-      el('div', { class: 'project-head' }, el('h2', {}, `Fait (${finished.length} sous-tâches)`))),
-    el('table', {},
-      el('thead', {}, el('tr', {}, ...['Date', 'N°', 'Intitulé'].map((t) => el('th', {}, t)))),
-      el('tbody', {}, ...rows)));
-  details.open = state.openProjects.has('done-section');
-  return details;
+  const sorted = [
+    ...finished.filter((r) => dateOf(r)).sort((a, b) => dateOf(b).localeCompare(dateOf(a)) || byNumberDesc(a, b)),
+    ...finished.filter((r) => !dateOf(r)).sort(byNumberDesc),
+  ];
+  const groups = [];
+  for (const r of sorted) {
+    const month = dateOf(r)?.slice(0, 7) ?? null;
+    if (groups.at(-1)?.month !== month) groups.push({ month, rows: [] });
+    groups.at(-1).rows.push(r);
+  }
+  return groups;
+}
+
+const MONTH_FORMAT = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+function monthLabel(month) {
+  return month ? MONTH_FORMAT.format(new Date(month + '-01T00:00:00Z')) : 'non datées';
+}
+
+// "Fait" section: one accordion per month, each closed until opened (state kept for the visit).
+function renderDone(steps) {
+  const finished = steps.flatMap((step) => step.subtasks.filter((s) => s.status === 'Terminé').map((sub) => ({ sub, step })));
+  return groupDoneByMonth(finished).map(({ month, rows }) => {
+    const key = 'done-' + (month ?? 'undated');
+    const details = el('details', { class: 'card project', 'data-project': key },
+      el('summary', {},
+        el('div', { class: 'project-head' },
+          el('h2', {}, `Fait · ${monthLabel(month)} (${rows.length} sous-tâche${rows.length > 1 ? 's' : ''})`))),
+      el('table', {},
+        el('thead', {}, el('tr', {}, ...['Date', 'N°', 'Intitulé'].map((t) => el('th', {}, t)))),
+        el('tbody', {}, ...rows.map(({ sub, step }) => el('tr', {},
+          el('td', { class: 'time' }, ...doneDateCell(sub, step)),
+          el('td', { class: 'num' }, sub.n),
+          el('td', {}, sub.label, el('div', { class: 'parent' }, parentLabel(step))))))));
+    details.open = state.openProjects.has(key);
+    return details;
+  });
 }
 
 function render() {
@@ -760,7 +808,7 @@ function render() {
     renderToday(model.steps),
     ...renderProjects(model.projects, model.steps),
     renderMilestones(model.milestones, model.steps),
-    renderDone(model.steps)].filter(Boolean));
+    ...renderDone(model.steps)].filter(Boolean));
 }
 
 // Sub-task toggles: delegated, and the open set survives the periodic re-render.

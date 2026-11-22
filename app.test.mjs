@@ -190,3 +190,28 @@ test('done files: a missing file or a count mismatch keeps what is there and war
   const without = { info: {}, projects: [], steps: [{ id: 'x' }] };
   assert.deepEqual(plain(context.mergeDone(without, {}).steps), [{ id: 'x' }]);
 });
+
+test('today list: tasks in progress first, finished last, then by today number', () => {
+  const r = (today, status) => ({ sub: { today, status } });
+  const rows = [r(1, 'Terminé'), r(2, 'À faire'), r(3, 'En cours'), r(4, 'Terminé'), r(5, 'En cours'), r(6, 'Bloqué')];
+  assert.deepEqual(plain(rows.sort(context.compareTodayRows).map((x) => x.sub.today)), [3, 5, 2, 6, 1, 4]);
+});
+
+test('Fait section: one group per month of done date, newest first, undated last', () => {
+  const r = (n, date) => ({ sub: { n, done_date: date }, step: {} });
+  const groups = context.groupDoneByMonth([
+    r('1.1', '2026-10-30'), r('2.1', '2026-11-02'), r('2.2', null), r('3.1', '2026-11-20'), r('3.2', '2026-11-20'),
+  ]);
+  assert.deepEqual(plain(groups.map((g) => [g.month, g.rows.map((x) => x.sub.n)])), [
+    ['2026-11', ['3.2', '3.1', '2.1']], ['2026-10', ['1.1']], [null, ['2.2']]]);
+  assert.equal(context.monthLabel('2026-11'), 'novembre 2026');
+  assert.equal(context.monthLabel(null), 'non datées');
+});
+
+test('finished projects: first and last sprint, one badge when they are the same', () => {
+  const s = (sprint, sprints) => ({ sprint, sprints });
+  assert.deepEqual(plain(context.sprintRange([s(1), s(3), s(2)])), [1, 3]);
+  assert.deepEqual(plain(context.sprintRange([s(2, [1, 2]), s(4)])), [1, 4]);
+  assert.deepEqual(plain(context.sprintRange([s(2), s(2)])), [2]);
+  assert.deepEqual(plain(context.sprintRange([s(null)])), []);
+});

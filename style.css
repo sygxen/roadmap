@@ -214,3 +214,7 @@ button.closed-toggle:hover { color: var(--text); }
 
 /* One-line summary of the day's list, next to its title. */
 .today-summary { margin-left: 12px; color: var(--muted); font-size: 14px; font-weight: 400; }
+/* Finished project: first and last sprint badges with an arrow (#C-1014). */
+.sprint-range { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; }
+.sprint-range .badge { margin-left: 0; }
+.sprint-arrow { font-size: 13px; font-weight: 400; color: var(--muted); }
