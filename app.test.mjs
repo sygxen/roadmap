@@ -206,6 +206,8 @@ test('Fait section: one group per month of done date, newest first, undated last
     ['2026-11', ['3.2', '3.1', '2.1']], ['2026-10', ['1.1']], [null, ['2.2']]]);
   assert.equal(context.monthLabel('2026-11'), 'novembre 2026');
   assert.equal(context.monthLabel(null), 'non datées');
+  assert.equal(context.monthLabel('2026-1'), '2026-1');
+  assert.equal(context.monthLabel('2026-13'), '2026-13');
 });
 
 test('finished projects: first and last sprint, one badge when they are the same', () => {

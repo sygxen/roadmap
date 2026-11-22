@@ -773,8 +773,11 @@ function groupDoneByMonth(finished) {
 }
 
 const MONTH_FORMAT = new Intl.DateTimeFormat('fr-FR', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+// A malformed done_date must not break the whole page: its raw month text is shown instead.
 function monthLabel(month) {
-  return month ? MONTH_FORMAT.format(new Date(month + '-01T00:00:00Z')) : 'non datées';
+  if (!month) return 'non datées';
+  const date = new Date(month + '-01T00:00:00Z');
+  return /^\d{4}-\d{2}$/.test(month) && !Number.isNaN(date.getTime()) ? MONTH_FORMAT.format(date) : month;
 }
 
 // "Fait" section: one accordion per month, each closed until opened (state kept for the visit).
