@@ -555,13 +555,20 @@ function compareTodayRows(a, b) {
 // shows no parent line. The list date is the latest today_date of all tasks; "Plus tard" ones
 // never enter the list (Yoni, PR #15), but a latest list holding only "Plus tard" stays empty
 // instead of falling back to an older list.
+// Time left on a step put whole in the today list (#C-1030): its open sub-tasks (neither finished
+// nor "Plus tard"), or its own load when it has no sub-task.
+function stepRemaining(step) {
+  if (!step.subtasks.length) return step.load;
+  return sum(step.subtasks.filter((s) => s.status !== 'Terminé' && s.status !== 'Plus tard'), (s) => s.estimate_min);
+}
+
 function todayRows(steps) {
   const dated = steps.flatMap((step) => [
     ...step.subtasks.filter((s) => s.today != null && s.today_date).map((sub) => ({ sub, step })),
     ...(step.today != null && step.today_date ? [{
       sub: {
         today: step.today, today_date: step.today_date, status: step.status,
-        estimate_min: step.load, label: step.step, n: step.num, owner: step.owner,
+        estimate_min: stepRemaining(step), label: step.step, n: step.num, owner: step.owner,
       },
       step,
       isStep: true,

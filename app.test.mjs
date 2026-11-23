@@ -256,3 +256,15 @@ test('project duration label next to the title (PR #16)', () => {
   assert.equal(context.projectEstimateLabel(90), '~2 h');
   assert.equal(context.projectEstimateLabel(45), '45 min');
 });
+
+test('today list: a whole step with sub-tasks shows its remaining time, not its full load (#C-1030)', () => {
+  const sub = (status, estimate_min) => ({ status, estimate_min });
+  const steps = [
+    { num: 202, status: 'En cours', load: 760, today: 1, today_date: '2026-11-23',
+      subtasks: [sub('Terminé', 320), sub('En cours', 300), sub('À faire', 140), sub('Plus tard', 60)] },
+    { num: 198, status: 'En cours', load: 60, today: 2, today_date: '2026-11-23', subtasks: [sub('Terminé', 60)] },
+    { num: 313, status: 'En cours', load: 1200, today: 3, today_date: '2026-11-23', subtasks: [] },
+  ];
+  const { rows } = context.todayRows(steps);
+  assert.deepEqual(plain(rows.map((r) => [r.sub.n, r.sub.estimate_min])), [[202, 440], [198, 0], [313, 1200]]);
+});
