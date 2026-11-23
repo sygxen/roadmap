@@ -442,17 +442,23 @@ function renderChart(steps, sprint, sprintDates) {
     return card;
   }
 
-  const fit = regress(points);
   const last = points[points.length - 1];
-  let projectedDay = null;
-  if (fit && fit.slope > 0) {
-    const day = (100 - fit.intercept) / fit.slope;
-    if (day >= last.x && day - last.x < 3650) projectedDay = Math.ceil(day);
-  }
+  const projectDay = (fit) => {
+    if (fit && fit.slope > 0) {
+      const day = (100 - fit.intercept) / fit.slope;
+      if (day >= last.x && day - last.x < 3650) return Math.ceil(day);
+    }
+    return null;
+  };
+  // Two trend lines: sub-tasks done (count, p.y) and estimated time done (p.pctTime), each projected to 100 %.
+  const fitCount = regress(points.map((p) => ({ x: p.x, y: p.y })));
+  const fitTime = regress(points.map((p) => ({ x: p.x, y: p.pctTime })));
+  const projCount = projectDay(fitCount);
+  const projTime = projectDay(fitTime);
 
   const W = 800, H = 300, L = 40, R = 16, T = 12, B = 28;
   const x0 = points[0].x;
-  const x1 = Math.max(last.x, projectedDay ?? last.x, x0 + 1);
+  const x1 = Math.max(last.x, projCount ?? last.x, projTime ?? last.x, x0 + 1);
   const sx = (day) => L + ((day - x0) / (x1 - x0)) * (W - L - R);
   const sy = (pct) => T + (1 - pct / 100) * (H - T - B);
 
@@ -477,15 +483,14 @@ function renderChart(steps, sprint, sprintDates) {
   add('text', { class: 'axis-label', x: L, y: H - 8, 'text-anchor': 'start' }, isoOf(x0));
   add('text', { class: 'axis-label', x: W - R, y: H - 8, 'text-anchor': 'end' }, isoOf(x1));
 
-  if (projectedDay !== null) {
-    add('line', { class: 'proj', x1: sx(last.x), y1: sy(last.y), x2: sx(projectedDay), y2: sy(100) });
-  }
-  add('polyline', { class: 'line', points: points.map((p) => `${sx(p.x)},${sy(p.y)}`).join(' ') });
+  // Projections first (dashed), the solid curves on top.
+  if (projCount !== null) add('line', { class: 'proj proj-count', x1: sx(last.x), y1: sy(last.y), x2: sx(projCount), y2: sy(100) });
+  if (projTime !== null) add('line', { class: 'proj proj-time', x1: sx(last.x), y1: sy(last.pctTime), x2: sx(projTime), y2: sy(100) });
+  add('polyline', { class: 'line line-time', points: points.map((p) => `${sx(p.x)},${sy(p.pctTime)}`).join(' ') });
+  add('polyline', { class: 'line line-count', points: points.map((p) => `${sx(p.x)},${sy(p.y)}`).join(' ') });
 
   const tooltip = document.getElementById('tooltip');
-  for (const p of points) {
-    const circle = add('circle', { class: 'pt', cx: sx(p.x), cy: sy(p.y), r: 5 });
-    const text = `${p.date} : ${formatNumber(p.y, 1)} % (${p.done} sur ${p.base}), ${formatNumber(p.pctTime, 1)} % en temps`;
+  const hover = (circle, text) => {
     circle.addEventListener('mousemove', (event) => {
       tooltip.hidden = false;
       tooltip.textContent = text;
@@ -493,16 +498,23 @@ function renderChart(steps, sprint, sprintDates) {
       tooltip.style.top = event.clientY + 12 + 'px';
     });
     circle.addEventListener('mouseleave', () => { tooltip.hidden = true; });
+  };
+  for (const p of points) {
+    const text = `${p.date} : ${formatNumber(p.y, 1)} % tâches (${p.done} sur ${p.base}), ${formatNumber(p.pctTime, 1)} % temps`;
+    hover(add('circle', { class: 'pt pt-time', cx: sx(p.x), cy: sy(p.pctTime), r: 4 }), text);
+    hover(add('circle', { class: 'pt pt-count', cx: sx(p.x), cy: sy(p.y), r: 4 }), text);
   }
-  card.append(svg);
+  const chartLegend = el('div', { class: 'chart-legend' },
+    el('span', {}, el('i', { class: 'sw sw-count' }), 'Tâches terminées (nombre)'),
+    el('span', {}, el('i', { class: 'sw sw-time' }), 'Temps estimé réalisé'));
+  card.append(svg, chartLegend);
 
-  let forecast;
-  if (projectedDay !== null) {
-    forecast = `Au rythme actuel (${formatNumber(fit.slope, 2)} point par jour), 100 % serait atteint le ${isoOf(projectedDay)}`;
-  } else {
-    forecast = 'projection impossible pour l’instant';
-  }
-  card.append(el('p', { class: 'forecast' }, forecast));
+  const forecastLine = (label, fit, proj) => proj !== null
+    ? `${label} : au rythme actuel (${formatNumber(fit.slope, 2)} point/jour), 100 % le ${isoOf(proj)}`
+    : `${label} : projection impossible pour l’instant`;
+  card.append(
+    el('p', { class: 'forecast' }, forecastLine('Tâches', fitCount, projCount)),
+    el('p', { class: 'forecast' }, forecastLine('Temps', fitTime, projTime)));
   return card;
 }
 
@@ -550,8 +562,10 @@ function renderToday(steps) {
       isStep: true,
     }] : []),
   ]);
-  const listDate = dated.reduce((max, r) => (r.sub.today_date > max ? r.sub.today_date : max), '');
-  const rows = dated
+  // "Plus tard" n'entre jamais dans la liste du jour (Yoni) : on écarte ces lignes avant de choisir la date et de bâtir la liste.
+  const active = dated.filter((r) => r.sub.status !== 'Plus tard' && r.step.status !== 'Plus tard');
+  const listDate = active.reduce((max, r) => (r.sub.today_date > max ? r.sub.today_date : max), '');
+  const rows = active
     .filter((r) => r.sub.today_date === listDate)
     .sort(compareTodayRows);
   const totalMin = sum(rows, (r) => r.sub.estimate_min);
