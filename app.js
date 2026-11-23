@@ -741,6 +741,13 @@ function projectEstimateLabel(min) {
   return min >= 60 ? `~${Math.round(min / 60)} h` : `${Math.round(min)} min`;
 }
 
+// Charge restante d'une étape : sous-tâches ouvertes si elle en a, sinon sa charge si pas terminée.
+function remainingLoad(step) {
+  const subs = step.subtasks || [];
+  if (subs.length) return subs.filter((s) => s.status !== 'Terminé').reduce((t, s) => t + (s.estimate_min || 0), 0);
+  return step.status === 'Terminé' ? 0 : (step.load || 0);
+}
+
 function closedToggleLabel(shown) {
   return `${shown ? 'Masquer' : 'Afficher'} les projets terminés`;
 }
@@ -754,7 +761,8 @@ function projectGrid(list) {
     const done = group.filter((s) => s.status === 'Terminé').length;
     const pct = group.length ? (done / group.length) * 100 : 0;
     const estMin = group.reduce((t, s) => t + (s.load || 0), 0);
-    const estLabel = projectEstimateLabel(estMin);
+    const remainMin = group.reduce((t, s) => t + remainingLoad(s), 0);
+    const estLabel = `${projectEstimateLabel(remainMin)} / ${projectEstimateLabel(estMin)}`;
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
