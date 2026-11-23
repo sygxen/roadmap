@@ -733,10 +733,12 @@ function projectGrid(list) {
     const closed = closedInfo(group);
     const done = group.filter((s) => s.status === 'Terminé').length;
     const pct = group.length ? (done / group.length) * 100 : 0;
+    const estMin = group.reduce((t, s) => t + (s.load || 0), 0);
+    const estLabel = estMin >= 60 ? `~${Math.round(estMin / 60)} h` : `${Math.round(estMin)} min`;
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
-        el('div', { class: 'project-head' }, el('h2', {}, project.name, closed ? sprintRangeLabel(group) : sprintsLabel(group), closedBadge(closed)),
+        el('div', { class: 'project-head' }, el('h2', {}, project.name, el('span', { class: 'project-estimate' }, estLabel), closed ? sprintRangeLabel(group) : sprintsLabel(group), closedBadge(closed)),
           el('span', {}, `${done} / ${group.length} terminées`)),
         el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
