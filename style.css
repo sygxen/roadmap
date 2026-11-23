@@ -208,6 +208,8 @@ tr.milestone-done td { font-weight: 500; }
 tr.milestone-done td.time:nth-child(3) { color: var(--green); }
 
 .sprints { margin-left: 10px; font-size: 12px; font-weight: 400; color: var(--muted); }
+/* Durée estimée du projet, en gris clair à côté du titre. */
+.project-estimate { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--pale); }
 
 
 .breadcrumb { display: flex; align-items: center; gap: 6px; padding: 8px 12px; }
