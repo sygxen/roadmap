@@ -19,6 +19,7 @@ const STATUS_CLASS = {
   'En pause': 'pause',
   'Bloqué': 'blocked',
   'Plus tard': 'later',
+  'Abandonné': 'dropped',
   'À renseigner': 'tbd',
 };
 
@@ -49,9 +50,15 @@ function el(tag, attrs, ...children) {
   return node;
 }
 
+function dotClass(status) { return STATUS_CLASS[status] || 'tbd'; }
 function dot(status) {
-  return el('span', { class: 'dot ' + (STATUS_CLASS[status] || 'tbd'), 'aria-hidden': 'true' });
+  return el('span', { class: 'dot ' + dotClass(status), 'aria-hidden': 'true' });
 }
+
+// "Plus tard" and "Abandonné" tasks are left out of every figure (Yoni): neither done nor left to do.
+// An abandoned task will never be done and carries no done_date (#C-1034).
+const ABANDONED = 'Abandonné';
+const isOut = (status) => status === 'Plus tard' || status === ABANDONED;
 
 function statusCell(status) {
   return el('span', { class: 'status-cell' }, dot(status), status);
@@ -194,16 +201,19 @@ function showBanner() {
 
 // ---------- model and computations ----------
 
-// A step's load is the sum of its sub-tasks' estimate_min (the step's own estimate_min should match).
+// A step's load is the sum of its sub-tasks' estimate_min (the step's own estimate_min should match),
+// abandoned sub-tasks left out; an abandoned step has no load.
 function buildModel(global) {
   const steps = global.steps.map((step) => {
     const subtasks = step.subtasks ?? [];
-    const load = subtasks.length ? sum(subtasks, (s) => s.estimate_min) : (step.estimate_min || 0);
+    const fullLoad = subtasks.length ? sum(subtasks, (s) => s.estimate_min) : (step.estimate_min || 0);
     // A step without estimate whose sub-tasks have none either is a dev-team ticket tracked in JIRA: no warning.
     const timed = subtasks.some((s) => s.estimate_min != null);
-    if (subtasks.length && step.estimate_min !== load && (step.estimate_min != null || timed)) {
-      console.warn(`step ${step.id}: estimate_min ${step.estimate_min} differs from sub-task sum ${load}`);
+    if (subtasks.length && step.estimate_min !== fullLoad && (step.estimate_min != null || timed)) {
+      console.warn(`step ${step.id}: estimate_min ${step.estimate_min} differs from sub-task sum ${fullLoad}`);
     }
+    const load = step.status === ABANDONED ? 0
+      : subtasks.length ? sum(subtasks.filter((s) => s.status !== ABANDONED), (s) => s.estimate_min) : fullLoad;
     return { ...step, subtasks, load };
   });
   for (const step of steps) {
@@ -262,10 +272,12 @@ const subSprint = (sub, step) => sub.sprint ?? step.sprint;
 // Sprints a step touches: its "sprints" list, else its own single sprint.
 const stepSprints = (step) => step.sprints ?? (step.sprint == null ? [] : [step.sprint]);
 
-// Sprint scope: its sub-tasks, minus those (or those of a step) set to "Plus tard".
-const sprintScope = (steps, n) => steps.flatMap((step) => step.subtasks
-  .filter((sub) => n > 0 && subSprint(sub, step) === n && sub.status !== 'Plus tard' && step.status !== 'Plus tard')
-  .map((sub) => ({ sub, step })));
+// Sprint scope: its sub-tasks, minus those (or those of a step) set to "Plus tard" or "Abandonné".
+function sprintScope(steps, n) {
+  return steps.flatMap((step) => step.subtasks
+    .filter((sub) => n > 0 && subSprint(sub, step) === n && !isOut(sub.status) && !isOut(step.status))
+    .map((sub) => ({ sub, step })));
+}
 
 // Today's date in Paris, as YYYY-MM-DD (the en-CA locale formats dates that way).
 const parisToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date());
@@ -299,9 +311,9 @@ function sprintProgress(steps, n, start, end) {
 
 function computeStats(steps) {
   const count = (status) => steps.filter((s) => s.status === status).length;
-  const counted = steps.filter((s) => s.status !== 'Plus tard');
+  const counted = steps.filter((s) => !isOut(s.status));
   const stepsDone = counted.filter((s) => s.status === 'Terminé').length;
-  const subs = counted.flatMap((s) => s.subtasks);
+  const subs = counted.flatMap((s) => s.subtasks).filter((s) => s.status !== ABANDONED);
   const subsDone = subs.filter((s) => s.status === 'Terminé');
   const totalMin = sum(subs, (s) => s.estimate_min);
   const doneMin = sum(subsDone, (s) => s.estimate_min);
@@ -312,6 +324,7 @@ function computeStats(steps) {
     doing: count('En cours'),
     todo: count('À faire'),
     later: count('Plus tard'),
+    abandoned: count(ABANDONED),
     blocked: count('Bloqué'),
     pauseOrTbd: count('En pause') + count('À renseigner'),
     stepsBase: counted.length,
@@ -362,7 +375,8 @@ function renderHeader(stats, info) {
     el('p', { class: 'subtitle' }, `Version ${info.version ?? '?'}, mise à jour le ${info.date ?? '?'}`),
     el('p', { class: 'summary' },
       `${stats.finished} étapes terminées sur ${stats.total}, ${stats.doing} en cours, ${stats.todo} à faire, ` +
-      `${stats.later} plus tard, ${stats.blocked} bloquée${stats.blocked > 1 ? 's' : ''}, ${stats.pauseOrTbd} à renseigner ou en pause`),
+      `${stats.later} plus tard, ${stats.blocked} bloquée${stats.blocked > 1 ? 's' : ''}, ${stats.pauseOrTbd} à renseigner ou en pause` +
+      (stats.abandoned ? `, ${stats.abandoned} abandonnée${stats.abandoned > 1 ? 's' : ''}` : '')),
     legend);
 }
 
@@ -559,7 +573,7 @@ function compareTodayRows(a, b) {
 // nor "Plus tard"), or its own load when it has no sub-task.
 function stepRemaining(step) {
   if (!step.subtasks.length) return step.load;
-  return sum(step.subtasks.filter((s) => s.status !== 'Terminé' && s.status !== 'Plus tard'), (s) => s.estimate_min);
+  return sum(step.subtasks.filter((s) => s.status !== 'Terminé' && !isOut(s.status)), (s) => s.estimate_min);
 }
 
 function todayRows(steps) {
@@ -576,7 +590,7 @@ function todayRows(steps) {
   ]);
   const listDate = dated.reduce((max, r) => (r.sub.today_date > max ? r.sub.today_date : max), '');
   const rows = dated
-    .filter((r) => r.sub.today_date === listDate && r.sub.status !== 'Plus tard' && r.step.status !== 'Plus tard')
+    .filter((r) => r.sub.today_date === listDate && !isOut(r.sub.status) && !isOut(r.step.status))
     .sort(compareTodayRows);
   return { listDate, rows };
 }
@@ -653,7 +667,8 @@ function renderMilestones(milestones, steps) {
     const group = wanted.length
       ? steps.filter((s) => wanted.includes(s.num))
       : steps.filter((s) => !listed.has(s.num));
-    const allDone = wanted.length > 0 && group.length > 0 && group.every((s) => s.status === 'Terminé');
+    const settled = group.filter((s) => s.status !== ABANDONED);
+    const allDone = wanted.length > 0 && settled.length > 0 && settled.every((s) => s.status === 'Terminé');
     const doneDate = group.reduce((max, s) => ((s.done_date ?? '') > max ? s.done_date : max), '');
     return {
       m: allDone ? { ...m, status: 'Terminé', date: doneDate || m.date } : m,
@@ -664,7 +679,7 @@ function renderMilestones(milestones, steps) {
   const isDone = (m) => m.status === 'Terminé';
   const ordered = [...resolved].sort((a, b) => Number(isDone(a.m)) - Number(isDone(b.m)));
   const rows = ordered.map(({ m, group }) => {
-    const subs = group.flatMap((s) => s.subtasks);
+    const subs = group.filter((s) => s.status !== ABANDONED).flatMap((s) => s.subtasks).filter((s) => s.status !== ABANDONED);
     const done = subs.filter((s) => s.status === 'Terminé').length;
     const pct = subs.length ? (done / subs.length) * 100 : 0;
     return el('tr', { class: isDone(m) ? 'milestone-done' : '' },
@@ -681,9 +696,11 @@ function renderMilestones(milestones, steps) {
       el('tbody', {}, ...rows)));
 }
 
-// A project whose steps are all finished: closing date = latest done_date, effort = sum of estimates.
+// A project whose steps are all finished (abandoned ones aside): closing date = latest done_date,
+// effort = sum of estimates.
 function closedInfo(group) {
-  if (!group.length || !group.every((s) => s.status === 'Terminé')) return null;
+  const settled = group.filter((s) => s.status !== ABANDONED);
+  if (!settled.length || !settled.every((s) => s.status === 'Terminé')) return null;
   const date = group.reduce((max, s) => ((s.done_date ?? '') > max ? s.done_date : max), '');
   return { date, hours: Math.round(sum(group, (s) => s.load) / 60) };
 }
@@ -721,7 +738,7 @@ function closedBadge(closed) {
 
 // Steps of a project: by status in this order, then by number (decision of 2026-11-15).
 // An unknown status goes after every known one.
-const STATUS_ORDER = ['En cours', 'À faire', 'Bloqué', 'En pause', 'À renseigner', 'Plus tard', 'Terminé'];
+const STATUS_ORDER = ['En cours', 'À faire', 'Bloqué', 'En pause', 'À renseigner', 'Plus tard', 'Terminé', 'Abandonné'];
 function statusRank(status) {
   return STATUS_ORDER.includes(status) ? STATUS_ORDER.indexOf(status) : STATUS_ORDER.length;
 }
@@ -744,8 +761,8 @@ function projectEstimateLabel(min) {
 // Charge restante d'une étape : sous-tâches ouvertes si elle en a, sinon sa charge si pas terminée.
 function remainingLoad(step) {
   const subs = step.subtasks || [];
-  if (subs.length) return subs.filter((s) => s.status !== 'Terminé').reduce((t, s) => t + (s.estimate_min || 0), 0);
-  return step.status === 'Terminé' ? 0 : (step.load || 0);
+  if (subs.length) return subs.filter((s) => s.status !== 'Terminé' && s.status !== ABANDONED).reduce((t, s) => t + (s.estimate_min || 0), 0);
+  return step.status === 'Terminé' || step.status === ABANDONED ? 0 : (step.load || 0);
 }
 
 function closedToggleLabel(shown) {
@@ -758,8 +775,9 @@ function projectGrid(list) {
   const columns = [el('div', { class: 'col' }), el('div', { class: 'col' })];
   list.forEach(({ project, group }, index) => {
     const closed = closedInfo(group);
-    const done = group.filter((s) => s.status === 'Terminé').length;
-    const pct = group.length ? (done / group.length) * 100 : 0;
+    const counted = group.filter((s) => s.status !== ABANDONED);
+    const done = counted.filter((s) => s.status === 'Terminé').length;
+    const pct = counted.length ? (done / counted.length) * 100 : 0;
     const estMin = group.reduce((t, s) => t + (s.load || 0), 0);
     const remainMin = group.reduce((t, s) => t + remainingLoad(s), 0);
     const estLabel = `${projectEstimateLabel(remainMin)} / ${projectEstimateLabel(estMin)}`;
@@ -767,7 +785,7 @@ function projectGrid(list) {
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},
         el('div', { class: 'project-head' }, el('h2', {}, project.name, estMin > 0 && !closed ? el('span', { class: 'project-estimate' }, estLabel) : null, closed ? sprintRangeLabel(group) : sprintsLabel(group), closedBadge(closed)),
-          el('span', {}, `${done} / ${group.length} terminées`)),
+          el('span', {}, `${done} / ${counted.length} terminées`)),
         el('div', { class: 'bar' }, el('i', { style: `width:${pct.toFixed(1)}%` }))),
       el('table', {},
         el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Étape', 'Reste à faire', 'Qui'].map((t) => el('th', {}, t)))),

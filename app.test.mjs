@@ -268,3 +268,45 @@ test('today list: a whole step with sub-tasks shows its remaining time, not its 
   const { rows } = context.todayRows(steps);
   assert.deepEqual(plain(rows.map((r) => [r.sub.n, r.sub.estimate_min])), [[202, 440], [198, 0], [313, 1200]]);
 });
+
+// ---------- "Abandonné" status (#C-1034): never done, never left to do ----------
+
+const abandonedSteps = () => context.buildModel({ info: {}, projects: [], steps: [
+  { id: 's1', num: 1, project_id: 'p', status: 'En cours', sprint: 2, estimate_min: 100, subtasks: [
+    { n: '1.1', status: 'Terminé', estimate_min: 40, done_date: '2026-11-20', today: 1, today_date: '2026-11-23' },
+    { n: '1.2', status: 'Abandonné', estimate_min: 60, today: 2, today_date: '2026-11-23' },
+  ] },
+  { id: 's2', num: 2, project_id: 'p', status: 'Abandonné', sprint: 2, estimate_min: 30, subtasks: [],
+    today: 3, today_date: '2026-11-23' },
+  { id: 's3', num: 3, project_id: 'p', status: 'Terminé', sprint: 2, estimate_min: 50, done_date: '2026-11-21', subtasks: [
+    { n: '3.1', status: 'Terminé', estimate_min: 50, done_date: '2026-11-21' },
+  ] },
+] }).steps;
+
+test('Abandonné: left out of the progress figures, neither done nor to do', () => {
+  const steps = abandonedSteps();
+  const stats = context.computeStats(steps);
+  assert.equal(stats.stepsBase, 2); // s1 and s3; s2 abandoned
+  assert.equal(stats.stepsDone, 1);
+  assert.equal(stats.subsBase, 2); // 1.1 and 3.1; 1.2 abandoned
+  assert.equal(stats.abandoned, 1);
+  assert.deepEqual(plain(context.sprintScope(steps, 2).map((r) => r.sub.n)), ['1.1', '3.1']);
+  assert.equal(steps[0].load, 40, 'an abandoned sub-task adds no load to its step');
+  assert.equal(context.remainingLoad(steps[0]), 0);
+  assert.equal(context.remainingLoad(steps[1]), 0);
+  assert.equal(context.stepRemaining(steps[0]), 0);
+});
+
+test('Abandonné: never in the today list nor in the Fait section', () => {
+  const steps = abandonedSteps();
+  assert.deepEqual(plain(context.todayRows(steps).rows.map((r) => r.sub.n)), ['1.1']);
+  const finished = steps.flatMap((step) => step.subtasks.filter((s) => s.status === 'Terminé').map((sub) => ({ sub, step })));
+  assert.deepEqual(plain(context.groupDoneByMonth(finished).flatMap((g) => g.rows.map((r) => r.sub.n))), ['3.1', '1.1']);
+});
+
+test('Abandonné: a project whose other steps are all finished is closed', () => {
+  const steps = abandonedSteps().map((s) => (s.num === 1 ? { ...s, status: 'Terminé', done_date: '2026-11-22' } : s));
+  assert.deepEqual(plain(context.closedInfo(steps)), { date: '2026-11-22', hours: 2 });
+  assert.equal(context.closedInfo(steps.filter((s) => s.status === 'Abandonné')), null, 'all abandoned: not "finished"');
+  assert.equal(context.dotClass('Abandonné'), 'dropped');
+});
