@@ -326,6 +326,15 @@ function computeStats(steps) {
   };
 }
 
+// Day a trend line reaches 100 %, from the last point on; none if it never rises or is 10 years away.
+function projectionDay(fit, lastX) {
+  if (fit && fit.slope > 0) {
+    const day = (100 - fit.intercept) / fit.slope;
+    if (day >= lastX && day - lastX < 3650) return Math.ceil(day);
+  }
+  return null;
+}
+
 // Least-squares line through (day, pct) points.
 function regress(points) {
   const n = points.length;
@@ -443,18 +452,11 @@ function renderChart(steps, sprint, sprintDates) {
   }
 
   const last = points[points.length - 1];
-  const projectDay = (fit) => {
-    if (fit && fit.slope > 0) {
-      const day = (100 - fit.intercept) / fit.slope;
-      if (day >= last.x && day - last.x < 3650) return Math.ceil(day);
-    }
-    return null;
-  };
   // Two trend lines: sub-tasks done (count, p.y) and estimated time done (p.pctTime), each projected to 100 %.
   const fitCount = regress(points.map((p) => ({ x: p.x, y: p.y })));
   const fitTime = regress(points.map((p) => ({ x: p.x, y: p.pctTime })));
-  const projCount = projectDay(fitCount);
-  const projTime = projectDay(fitTime);
+  const projCount = projectionDay(fitCount, last.x);
+  const projTime = projectionDay(fitTime, last.x);
 
   const W = 800, H = 300, L = 40, R = 16, T = 12, B = 28;
   const x0 = points[0].x;
@@ -548,9 +550,12 @@ function compareTodayRows(a, b) {
 // "Liste du ...": the latest list present in the file (greatest today_date), finished sub-tasks
 // included, by status then `today` order. It never disappears when the date changes: only the file's author
 // starts a new list. The `today` number is shown as is, never renumbered.
-function renderToday(steps) {
-  // A task is a sub-task, or a whole step that carries today / today_date itself (a step without
-  // sub-task): that step then stands in for its own sub-task and shows no parent line.
+// Rows of the "Liste du ..." card. A task is a sub-task, or a whole step that carries today /
+// today_date itself (a step without sub-task): that step then stands in for its own sub-task and
+// shows no parent line. The list date is the latest today_date of all tasks; "Plus tard" ones
+// never enter the list (Yoni, PR #15), but a latest list holding only "Plus tard" stays empty
+// instead of falling back to an older list.
+function todayRows(steps) {
   const dated = steps.flatMap((step) => [
     ...step.subtasks.filter((s) => s.today != null && s.today_date).map((sub) => ({ sub, step })),
     ...(step.today != null && step.today_date ? [{
@@ -562,12 +567,15 @@ function renderToday(steps) {
       isStep: true,
     }] : []),
   ]);
-  // "Plus tard" n'entre jamais dans la liste du jour (Yoni) : on écarte ces lignes avant de choisir la date et de bâtir la liste.
-  const active = dated.filter((r) => r.sub.status !== 'Plus tard' && r.step.status !== 'Plus tard');
-  const listDate = active.reduce((max, r) => (r.sub.today_date > max ? r.sub.today_date : max), '');
-  const rows = active
-    .filter((r) => r.sub.today_date === listDate)
+  const listDate = dated.reduce((max, r) => (r.sub.today_date > max ? r.sub.today_date : max), '');
+  const rows = dated
+    .filter((r) => r.sub.today_date === listDate && r.sub.status !== 'Plus tard' && r.step.status !== 'Plus tard')
     .sort(compareTodayRows);
+  return { listDate, rows };
+}
+
+function renderToday(steps) {
+  const { listDate, rows } = todayRows(steps);
   const totalMin = sum(rows, (r) => r.sub.estimate_min);
   const table = el('table', {},
     el('thead', {}, el('tr', {}, ...['N°', 'Statut', 'Temps', 'Tâche', 'Qui'].map((t) => el('th', {}, t)))),
@@ -721,6 +729,11 @@ function splitProjects(projects, steps) {
   return { open: all.filter((p) => !closedInfo(p.group)), closed: all.filter((p) => closedInfo(p.group)) };
 }
 
+// Estimated duration shown in light grey next to a project's title (PR #16).
+function projectEstimateLabel(min) {
+  return min >= 60 ? `~${Math.round(min / 60)} h` : `${Math.round(min)} min`;
+}
+
 function closedToggleLabel(shown) {
   return `${shown ? 'Masquer' : 'Afficher'} les projets terminés`;
 }
@@ -734,7 +747,7 @@ function projectGrid(list) {
     const done = group.filter((s) => s.status === 'Terminé').length;
     const pct = group.length ? (done / group.length) * 100 : 0;
     const estMin = group.reduce((t, s) => t + (s.load || 0), 0);
-    const estLabel = estMin >= 60 ? `~${Math.round(estMin / 60)} h` : `${Math.round(estMin)} min`;
+    const estLabel = projectEstimateLabel(estMin);
     // Accordion: the summary (title, count, progress bar) stays visible when collapsed.
     const accordion = el('details', { class: 'card project', 'data-project': project.id },
       el('summary', {},

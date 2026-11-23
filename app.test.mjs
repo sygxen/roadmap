@@ -217,3 +217,42 @@ test('finished projects: first and last sprint, one badge when they are the same
   assert.deepEqual(plain(context.sprintRange([s(2), s(2)])), [2]);
   assert.deepEqual(plain(context.sprintRange([s(null)])), []);
 });
+
+test('today list: "Plus tard" never shows, as a sub-task or as a whole step (PR #15)', () => {
+  const sub = (n, today, status, today_date = '2026-11-23') => ({ n, today, today_date, status });
+  const steps = [
+    { num: 1, status: 'En cours', load: 60, subtasks: [sub('1.1', 1, 'En cours'), sub('1.2', 2, 'Plus tard')] },
+    { num: 2, status: 'Plus tard', load: 30, subtasks: [sub('2.1', 3, 'À faire')] },
+    { num: 3, status: 'Plus tard', load: 30, subtasks: [], today: 4, today_date: '2026-11-23' },
+    { num: 4, status: 'À faire', load: 45, subtasks: [], today: 5, today_date: '2026-11-23' },
+  ];
+  const { listDate, rows } = context.todayRows(steps);
+  assert.equal(listDate, '2026-11-23');
+  assert.deepEqual(plain(rows.map((r) => r.sub.n)), ['1.1', 4]);
+});
+
+test('today list: a latest list made only of "Plus tard" stays empty, it never falls back to an older list', () => {
+  const steps = [
+    { num: 1, status: 'En cours', load: 60, subtasks: [{ n: '1.1', today: 1, today_date: '2026-11-22', status: 'En cours' }] },
+    { num: 2, status: 'Plus tard', load: 30, subtasks: [], today: 1, today_date: '2026-11-23' },
+  ];
+  const { listDate, rows } = context.todayRows(steps);
+  assert.equal(listDate, '2026-11-23');
+  assert.deepEqual(plain(rows), []);
+});
+
+test('chart projection: day the trend line reaches 100 %, none when flat, falling or too far (PR #15)', () => {
+  // y = 10 x + 20: 100 % at x = 8, i.e. day 8 (rounded up).
+  assert.equal(context.projectionDay(context.regress([{ x: 1, y: 30 }, { x: 2, y: 40 }, { x: 3, y: 50 }]), 3), 8);
+  assert.equal(context.projectionDay({ slope: 7, intercept: 0 }, 3), 15); // 14.28… rounded up
+  assert.equal(context.projectionDay({ slope: 0, intercept: 50 }, 3), null);
+  assert.equal(context.projectionDay({ slope: -2, intercept: 50 }, 3), null);
+  assert.equal(context.projectionDay({ slope: 0.01, intercept: 0 }, 3), null); // 10 000 days away
+  assert.equal(context.projectionDay(null, 3), null);
+});
+
+test('project duration label next to the title (PR #16)', () => {
+  assert.equal(context.projectEstimateLabel(42 * 60 + 20), '~42 h');
+  assert.equal(context.projectEstimateLabel(90), '~2 h');
+  assert.equal(context.projectEstimateLabel(45), '45 min');
+});
