@@ -98,6 +98,18 @@ tr.subtasks li .sub-time { flex: none; font-variant-numeric: tabular-nums; color
 .chart .pt { fill: var(--accent); stroke: var(--card); stroke-width: 2; cursor: pointer; }
 .chart .pt:hover { fill: var(--orange); }
 .chart .forecast { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
+/* Deux courbes : nombre de tâches (vert) et temps estimé (bleu), chacune avec sa projection. */
+.chart .line-count { stroke: var(--green); }
+.chart .line-time  { stroke: var(--accent); }
+.chart .proj-count { stroke: var(--green); opacity: .55; }
+.chart .proj-time  { stroke: var(--accent); opacity: .55; }
+.chart .pt-count { fill: var(--green); }
+.chart .pt-time  { fill: var(--accent); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend .sw { width: 16px; height: 3px; border-radius: 2px; display: inline-block; }
+.chart-legend .sw-count { background: var(--green); }
+.chart-legend .sw-time { background: var(--accent); }
 
 .tooltip {
   position: fixed; z-index: 20; pointer-events: none;
